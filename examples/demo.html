@@ -1,0 +1,106 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LayaPilot · Demo</title><style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17253a;background:#f3f6fb;font-synthesis:none}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh}
+button,input,select{font:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.45}
+a{color:inherit;text-decoration:none}
+.shell{min-height:100vh;display:grid;grid-template-columns:248px minmax(0,1fr)}
+.sidebar{background:#10263f;color:#d7e6f6;padding:28px 16px;display:flex;flex-direction:column;gap:42px;box-shadow:8px 0 28px #10263f0c}
+.brand{display:flex;align-items:center;gap:12px;padding:0 14px;color:white;font-size:17px;font-weight:750;letter-spacing:-.03em}
+.brand-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:linear-gradient(145deg,#53c6e6,#7067d8);color:white;font-size:18px;box-shadow:0 8px 22px #5d86d444}
+.nav-caption{color:#7894b2;text-transform:uppercase;letter-spacing:.15em;font-size:10px;font-weight:800;padding:0 14px;margin-bottom:12px}
+.nav-list{display:grid;gap:6px}
+.nav-list a{display:flex;align-items:center;gap:11px;padding:12px 14px;border-radius:11px;color:#c1d4e8;font-size:14px;font-weight:550;transition:background .18s,color .18s}
+.nav-list a:hover,.nav-list a[aria-current="page"]{background:#264868;color:white}
+.nav-list a[aria-current="page"]{box-shadow:inset 3px 0 #6cd8e9}
+.nav-list .icon{width:22px;text-align:center;color:#8ccde2;font-size:17px}
+.sidebar-note{margin-top:auto;padding:15px;border-radius:14px;background:#193b5c;border:1px solid #315577}
+.sidebar-note strong{display:block;color:white;font-size:12px}
+.sidebar-note p{margin:6px 0 0;color:#a9bfd5;font-size:12px;line-height:1.55}
+.workspace{min-width:0}
+.topbar{height:74px;background:#fff;border-bottom:1px solid #e7edf5;display:flex;align-items:center;justify-content:space-between;padding:0 38px}
+.topbar .trail{color:#8291a4;font-size:13px}
+.topbar .trail strong{color:#30435b;font-weight:650}
+.topbar .demo-pill{border-radius:100px;padding:7px 12px;background:#e7f8f6;color:#14796e;font-size:11px;font-weight:750;letter-spacing:.08em}
+.content{max-width:1320px;padding:34px 38px 70px;margin:0 auto}
+.eyebrow{color:#4877b4;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;margin:0 0 8px}
+.hero{padding:26px 29px;background:linear-gradient(115deg,#1b4673 0%,#27628d 56%,#5e74b5 100%);border-radius:22px;color:white;box-shadow:0 16px 36px #254c801e;position:relative;overflow:hidden;margin-bottom:24px}
+.hero:after{content:"";position:absolute;width:330px;height:330px;border-radius:50%;border:1px solid #ffffff3b;right:-60px;top:-220px;box-shadow:0 0 0 56px #ffffff0c,0 0 0 112px #ffffff09}
+.hero h2{font-size:25px;letter-spacing:-.03em;margin:0 0 6px}
+.hero p{margin:0;color:#d4e9fb;font-size:13px;line-height:1.6}
+.hero .hero-kicker{font-size:11px;color:#a5e5ef;font-weight:800;letter-spacing:.13em;margin-bottom:8px}
+.panel{background:#fff;border:1px solid #e4ebf3;border-radius:18px;box-shadow:0 6px 24px #1a36520a;padding:28px}
+.panel h1{font-size:23px;letter-spacing:-.035em;margin:0 0 24px;color:#182d46}
+.panel h1:after{content:"";display:block;margin-top:12px;width:34px;height:3px;border-radius:4px;background:#37a7c0}
+.panel label{display:inline-block;font-size:13px;font-weight:650;color:#3b5068;margin-right:10px}
+.panel input:not([type="checkbox"]),.panel select,dialog input{height:40px;min-width:215px;background:#fff;border:1px solid #cdd9e8;border-radius:9px;padding:0 12px;color:#1c2d44;outline:none;transition:border-color .16s,box-shadow .16s}
+.panel input:focus,.panel select:focus,dialog input:focus{border-color:#3999c2;box-shadow:0 0 0 3px #3999c21a}
+.panel input[type="checkbox"]{accent-color:#2589b4;width:16px;height:16px;margin-right:8px;vertical-align:middle}
+.panel button,dialog button{border:1px solid #cad8e7;border-radius:9px;background:#fff;color:#2d536f;height:40px;padding:0 16px;margin-left:8px;font-weight:650;transition:background .16s,transform .16s,box-shadow .16s}
+.panel button:hover:not(:disabled),dialog button:hover:not(:disabled){background:#eef7fb;transform:translateY(-1px)}
+.panel button:nth-of-type(1),dialog button:nth-of-type(1){background:#246d9c;border-color:#246d9c;color:white;box-shadow:0 5px 13px #246d9c26}
+.panel button:nth-of-type(1):hover:not(:disabled),dialog button:nth-of-type(1):hover:not(:disabled){background:#1c5d88}
+.panel section{overflow-x:auto;margin-top:22px}
+.panel table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+.panel th{background:#f5f8fc;color:#708198;text-transform:uppercase;letter-spacing:.05em;font-size:11px;font-weight:750;text-align:left;padding:13px 16px;border-top:1px solid #e8edf3;border-bottom:1px solid #e8edf3}
+.panel th:first-child{border-left:1px solid #e8edf3;border-top-left-radius:10px}
+.panel th:last-child{border-right:1px solid #e8edf3;border-top-right-radius:10px}
+.panel td{padding:14px 16px;border-bottom:1px solid #edf1f5;color:#2c415b}
+.panel td:last-child{white-space:nowrap}
+.panel tbody tr:hover td{background:#fbfdff}
+.panel td button{height:31px;padding:0 10px;margin:0 5px 0 0;font-size:12px;background:#f6fafc;box-shadow:none}
+.panel [role="status"]{padding:11px 14px;background:#e9f7f1;color:#217d58;border-radius:9px;font-size:13px}
+.panel fieldset{border:1px solid #dde6ee;border-radius:10px;margin:12px 0;padding:15px}
+dialog{border:1px solid #dfe8f1;border-radius:18px;min-width:min(480px,calc(100vw - 28px));max-width:calc(100vw - 28px);padding:28px;color:#243750;box-shadow:0 24px 70px #10233d40}
+dialog::backdrop{background:#11243c77;backdrop-filter:blur(3px)}
+dialog h2{margin:0 0 18px;font-size:21px}
+dialog label{display:block;font-size:13px;font-weight:650;margin:10px 0 7px}
+dialog input{width:100%;margin-bottom:22px}
+dialog p{line-height:1.6}
+dialog button{margin-left:0;margin-right:8px}
+.footer{color:#97a6b7;text-align:right;font-size:11px;margin-top:20px}
+@media(max-width:850px){.shell{grid-template-columns:1fr}
+.sidebar{padding:15px;gap:12px}
+.brand{font-size:14px}
+.nav-caption,.sidebar-note{display:none}
+.nav-list{display:flex;overflow:auto}
+.nav-list a{white-space:nowrap;padding:9px}
+.topbar{height:60px;padding:0 18px}
+.content{padding:20px 15px 40px}
+.panel{padding:20px}
+.panel input:not([type="checkbox"]){min-width:0;width:100%;margin:8px 0}
+.panel button{margin:6px 6px 0 0}
+.hero{padding:22px}
+.hero h2{font-size:21px}
+}
+
+.ant-form-item-has-error input{border-color:#dd5e67!important;box-shadow:0 0 0 3px #dd5e6717!important}
+.ant-form-item-explain-error{display:block;color:#ca4752;font-size:12px;margin:-14px 0 18px}
+.ant-form-item-explain-error[hidden]{display:none}
+
+</style></head><body><div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">✦</span><span>LayaPilot</span></div><div><p class="nav-caption">Test workspace</p><nav class="nav-list"><a href="/customers"><span class="icon">◉</span>客户管理</a><a href="/orders"><span class="icon">▤</span>订单管理</a><a href="/settings"><span class="icon">◇</span>通知设置</a><a href="/inventory"><span class="icon">▣</span>Inventory</a></nav></div><div class="sidebar-note"><strong>Interactive demo</strong><p>用于验证动态 DOM、表单操作和测试用例生成。数据仅保存在当前浏览器。</p></div></aside><div class="workspace"><header class="topbar"><div class="trail">Workspace / <strong>Demo cases</strong></div><span class="demo-pill">LOCAL DEMO</span></header><div class="content"><section class="hero"><div class="hero-kicker">BROWSER TESTING PLAYGROUND</div><h2>看得见的测试过程</h2><p>用真实页面交互验证定位、断言和回放，每次刷新都会重新生成控件标识。</p></section><p class="eyebrow">Demo module</p><main class="panel" id="root"></main><div class="footer">LayaPilot · local fixture</div></div></div></div>
+<script>
+const root=document.querySelector('#root'),route=location.pathname,id=()=>Math.random().toString(36).slice(2),saveError=__SAVE_ERROR__;document.querySelectorAll('.nav-list a').forEach(a=>{if(a.pathname===route||route==='/'&&a.pathname==='/customers')a.setAttribute('aria-current','page')});let customers=JSON.parse(localStorage.getItem('laya-demo-customers')||'["Laya演示客户","常规客户乙","常规客户丙"]');
+const persist=()=>localStorage.setItem('laya-demo-customers',JSON.stringify(customers));
+const table=(headers,rows)=>'<table><thead><tr>'+headers.map(x=>'<th>'+x+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(x=>'<td>'+x+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+function customer(){const key=id();root.innerHTML='<h1>客户管理</h1><label for="'+key+'">客户名称</label><input id="'+key+'"><button>搜索</button><button>重置</button><button>新增客户</button><section></section>';
+ const render=()=>{const section=root.querySelector('section');section.innerHTML=table(['客户名称','状态','操作'],customers.filter(x=>x.includes(root.querySelector('input').value)).map(x=>[x,'启用','']));for(const row of section.querySelectorAll('tbody tr')){const name=row.cells[0].innerText,cell=row.cells[2];for(const action of ['查看','编辑','删除']){const button=document.createElement('button');button.textContent=action;button.onclick=()=>act(action,name);cell.append(button);}}};render();
+ function act(action,name){
+  const d=document.createElement('dialog'),k=id();document.body.append(d);d.showModal();
+  if(action==='查看'){d.innerHTML='<h2>客户详情</h2><p></p><button>关闭</button>';d.querySelector('p').textContent=name;d.querySelector('button').onclick=()=>d.remove();return;}
+  if(action==='编辑'){d.innerHTML='<h2>编辑客户</h2><div class="ant-form-item"><label class="ant-form-item-required" for="'+k+'">客户名称</label><input aria-required="true" id="'+k+'" placeholder="请输入客户名称"><span role="alert" class="ant-form-item-explain-error" hidden>请输入唯一的客户名称</span></div><button>保存</button><button>取消</button>';d.querySelector('input').value=name;d.querySelector('input').oninput=()=>{d.querySelector('.ant-form-item').classList.remove('ant-form-item-has-error');d.querySelector('[role=alert]').hidden=true};d.querySelector('button').onclick=()=>{const value=d.querySelector('input').value.trim();if(!value||customers.includes(value)&&value!==name){d.querySelector('.ant-form-item').classList.add('ant-form-item-has-error');d.querySelector('[role=alert]').hidden=false;return;}customers[customers.indexOf(name)]=value;persist();d.remove();render();};d.querySelectorAll('button')[1].onclick=()=>d.remove();return;}
+  d.innerHTML='<h2>确认删除客户？</h2><p></p><button>确定</button><button>取消</button>';d.querySelector('p').textContent=name;d.querySelector('button').onclick=()=>{customers=customers.filter(x=>x!==name);persist();d.remove();render()};d.querySelectorAll('button')[1].onclick=()=>d.remove();
+ }
+ root.querySelectorAll('button')[0].onclick=()=>{setTimeout(render,450)};
+ root.querySelectorAll('button')[1].onclick=()=>{root.querySelector('input').value='';render()};
+ root.querySelectorAll('button')[2].onclick=()=>{const d=document.createElement('dialog'),k=id();d.innerHTML='<h2>新增客户</h2><div class="ant-form-item"><label class="ant-form-item-required" for="'+k+'">客户名称</label><input aria-required="true" id="'+k+'" placeholder="请输入客户名称"><span role="alert" class="ant-form-item-explain-error" hidden>请输入唯一的客户名称</span></div><button>保存</button><button>取消</button>';document.body.append(d);d.showModal();d.querySelector('input').oninput=()=>{d.querySelector('.ant-form-item').classList.remove('ant-form-item-has-error');d.querySelector('[role=alert]').hidden=true};d.querySelector('button').onclick=()=>{const value=d.querySelector('input').value.trim();if(!value||customers.includes(value)){d.querySelector('.ant-form-item').classList.add('ant-form-item-has-error');d.querySelector('[role=alert]').hidden=false;return;}if(saveError)fetch('/api/save-fail',{method:'POST'});customers.push(value);persist();d.remove();render();const p=document.createElement('p');p.setAttribute('role','status');p.textContent='保存成功';root.append(p)};d.querySelectorAll('button')[1].onclick=()=>d.remove();};
+}
+if(route==='/customers'||route==='/')customer();
+if(route==='/orders'){const k=id();root.innerHTML='<h1>订单管理</h1><label for="'+k+'">订单状态</label><select id="'+k+'"><option>全部</option><option>待处理</option><option>已完成</option></select><button>查询</button><section></section>';const all=[['订单A','待处理'],['订单B','已完成']];const render=()=>root.querySelector('section').innerHTML=table(['订单编号','状态'],all.filter(x=>root.querySelector('select').value==='全部'||x[1]===root.querySelector('select').value));render();root.querySelector('button').onclick=render;}
+if(route==='/settings'){const k=id();root.innerHTML='<h1>通知设置</h1><label><input type="checkbox" id="'+k+'">接收通知</label><button disabled>保存设置</button><p>设置尚未修改</p>';root.querySelector('input').onchange=()=>{root.querySelector('button').disabled=!root.querySelector('input').checked;};}
+if(route==='/inventory'){const k=id();root.innerHTML='<h1>Inventory</h1><label for="'+k+'">Product name</label><input id="'+k+'"><button>Search</button><button>Reset</button><section></section>';const products=['Demo pen','Demo book','Blue notebook'];const render=()=>root.querySelector('section').innerHTML=table(['Product','Stock'],products.filter(x=>x.toLowerCase().includes(root.querySelector('input').value.toLowerCase())).map(x=>[x,15]));render();root.querySelectorAll('button')[0].onclick=render;root.querySelectorAll('button')[1].onclick=()=>{root.querySelector('input').value='';render()};}
+if(route==='/ambiguous'){root.innerHTML='<h1>同名按钮场景</h1><fieldset><legend>客户查询</legend><button>查询</button></fieldset><fieldset><legend>订单查询</legend><button>查询</button></fieldset>';}
+if(route==='/late'){root.innerHTML='<h1>异步渲染</h1><p>正在加载</p>';setTimeout(()=>{root.innerHTML='<h1>异步渲染</h1><button>显示结果</button>';root.querySelector('button').onclick=()=>root.innerHTML='<p>加载完成</p>';},1000);}
+</script></body></html>

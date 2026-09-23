@@ -1,0 +1,17 @@
+{
+    "name": "laya-pilot",
+    "version": "0.1.0",
+    "private": false,
+    "description": "Generate and replay browser test cases from a live page or an Excel workbook",
+    "license": "MIT",
+    "engines": { "node": ">=20" },
+    "type": "module",
+    "scripts": {
+        "test": "node --test tests/*.test.mjs",
+        "start": "node runner.mjs",
+        "demo": "node examples/demo-server.mjs"
+    },
+    "dependencies": {
+        "playwright": "1.62.1"
+    }
+}
