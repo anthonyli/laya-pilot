@@ -10,7 +10,7 @@
 
 ## 介绍视频
 
-[![观看 LayaPilot 介绍视频](https://img.youtube.com/vi/aIZEEcTGM0w/hqdefault.jpg)](https://www.youtube.com/watch?v=aIZEEcTGM0w)
+https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d
 
 [在 YouTube 观看介绍视频](https://www.youtube.com/watch?v=aIZEEcTGM0w)
 

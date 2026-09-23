@@ -8,6 +8,12 @@ This public project includes a local demo, without company-specific adapters, in
 
 ![Customer management page in the public demo](docs/demo.png)
 
+## Introduction video
+
+https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d
+
+[Watch on YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
+
 ## Features
 
 | Entry point | What it does | Outputs |
