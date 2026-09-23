@@ -8,6 +8,12 @@
 
 ![公开 demo 的客户管理页面](docs/demo.png)
 
+## 介绍视频
+
+[![观看 LayaPilot 介绍视频](https://img.youtube.com/vi/aIZEEcTGM0w/hqdefault.jpg)](https://www.youtube.com/watch?v=aIZEEcTGM0w)
+
+[在 YouTube 观看介绍视频](https://www.youtube.com/watch?v=aIZEEcTGM0w)
+
 ## 功能
 
 | 入口 | 能力 | 产物 |
