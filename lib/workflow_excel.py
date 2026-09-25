@@ -75,6 +75,8 @@ def step_text(step):
         return f'核对「{target}」Tab已选中'
     if kind == 'assert-headers':
         return '核对列表列头包含：' + '、'.join(value)
+    if kind == 'assert-disabled':
+        return f'核对必填项为空时「{target}」按钮处于禁用状态（阻止保存）'
     raise ValueError('不支持的步骤：' + kind)
 
 
