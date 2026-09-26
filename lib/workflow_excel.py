@@ -107,6 +107,13 @@ def load_template(path):
 
 def write(payload):
     file = payload['file']
+    # 失败原因常含 ANSI 转义序列（\u001b[2m 等）与其它控制字符，openpyxl 会抛
+    # IllegalCharacterError 并把整个用例文件写出炸掉。统一在入口清洗。
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+    def clean(v):
+        return ILLEGAL_CHARACTERS_RE.sub('', v) if isinstance(v, str) else v
+
     source, old = load_template(payload.get('template'))
     book = Workbook()
     sheet = book.active
@@ -145,6 +152,7 @@ def write(payload):
                   '\n'.join(f'{n}、{step_text(step)}' for n, step in enumerate(case['steps'], 1)),
                   expected_text(case), None, None, '未执行', '自动生成', None,
                   remark, None]
+        values = [clean(v) for v in values]
         for col, value in enumerate(values, 1):
             dest = sheet.cell(index, col, value)
             sample = old.cell(2, col)
@@ -159,7 +167,7 @@ def write(payload):
                 dest.data_type = 's'
         sheet.row_dimensions[index].height = min(280, max(42, 18 * max(values[8].count('\n') + 1,
                                                                         values[9].count('\n') + 1)))
-        meta.append([values[0], digest(visible_fields(sheet, index)), json.dumps(case, ensure_ascii=False)])
+        meta.append([values[0], digest(visible_fields(sheet, index)), clean(json.dumps(case, ensure_ascii=False))])
     sheet.auto_filter.ref = f'A1:Q{max(2, sheet.max_row)}'
     Path(payload['path']).parent.mkdir(parents=True, exist_ok=True)
     book.save(payload['path'])
@@ -213,6 +221,9 @@ def results(payload):
         if diagnosis.get('primary'):
             notes.append(f'同期证据：{diagnosis["primary"]}')
         note = '\n'.join(notes)[:3000]
+        # 回放失败原因含 ANSI 转义（\u001b[2m 等），openpyxl 会抛 IllegalCharacterError
+        from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+        note = ILLEGAL_CHARACTERS_RE.sub('', note)
         remark = sheet.cell(row, 16)
         remark.value = note
         alignment = copy.copy(remark.alignment)
