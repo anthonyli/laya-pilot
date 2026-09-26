@@ -18,3 +18,16 @@ models/
 storage-state*.json
 test-results/
 playwright-report/
+.env.local
+.laya-auth/
+*.orig
+*.orig2
+coverage-summary.json
+regression-last.json
+# local project harness scripts (AIcustomer-service specific, contain local test creds)
+laya_batch.py
+run_regression.py
+public-walkthrough.mjs
+coverage-matrix.md
+coverage-summary.md
+regression-report.md

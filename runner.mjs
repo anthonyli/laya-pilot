@@ -19,7 +19,7 @@ const runId=new Date().toISOString().replace(/[:.]/g,'-');
 const config={url:option('--url','TEST_URL','url',''),excel:option('--excel','TEST_EXCEL','excel',''),user:option('--user','TEST_USER','user',''),python:option('--python','LAYA_PYTHON','python',path.join(ROOT,'.venv','bin','python')),model:option('--model','LAYA_MODEL','model','convaiinnovations/laya-multilingual'),
  provider:option('--provider','LAYA_PROVIDER','provider','local'),apiBase:option('--api-base','LAYA_API_BASE','apiBase',''),apiModel:option('--api-model','LAYA_API_MODEL','apiModel',''),apiTimeout:Number(option('--api-timeout','LAYA_API_TIMEOUT','apiTimeout',30000)),
  browserProvider:option('--browser-provider','BROWSER_PROVIDER','browserProvider','playwright'),browserChannel:option('--browser-channel','BROWSER_CHANNEL','browserChannel',''),
- headless:configuredFlag(args,'--headless','BROWSER_HEADLESS',fileConfig.headless),allowWrite:flag('--allow-write')&&!flag('--read-only'),readOnly:flag('--read-only'),includeApproval:flag('--include-approval'),manualLogin:flag('--manual-login'),keepOpen:flag('--keep-open'),dryRun:flag('--inspect'),reloadEachCase:flag('--reload-each-case'),language:option('--language','TEST_LANGUAGE','language','auto'),pageTimeout:Number(arg('--page-timeout','18000')),
+ headless:configuredFlag(args,'--headless','BROWSER_HEADLESS',fileConfig.headless),allowWrite:flag('--allow-write')&&!flag('--read-only'),readOnly:flag('--read-only'),noAuthReuse:flag('--no-auth-reuse'),includeApproval:flag('--include-approval'),manualLogin:flag('--manual-login'),keepOpen:flag('--keep-open'),dryRun:flag('--inspect'),reloadEachCase:flag('--reload-each-case'),language:option('--language','TEST_LANGUAGE','language','auto'),pageTimeout:Number(arg('--page-timeout','18000')),
  delay:Number(arg('--delay','180')),assertTimeout:Number(arg('--assert-timeout','4000')),maxSteps:Number(arg('--max-steps','25')),minProbability:Number(arg('--min-probability','0.68')),minMargin:Number(arg('--min-margin','0.18')),cases:arg('--cases','').split(',').filter(Boolean),data:{},runId,
  out:path.resolve(option('--out','TEST_OUTPUT','out',path.join(ROOT,'runs',runId)))};
 async function secret(label='登录密码',envName='TEST_PASSWORD'){
@@ -43,7 +43,7 @@ async function report(results,laya,source,warnings){
 }
 let laya,browser,activePage;
 async function main(){
- if(flag('--help')){console.log('LayaPilot\n生成：./run.sh --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n回放：./run.sh --mode execute --case-file 用例.xlsx [--url 页面地址]\n原有Excel：./run.sh --excel 用例.xlsx --url 页面地址 [--cases 001,002]\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。');return;}
+ if(flag('--help')){console.log('LayaPilot\n生成：./run.sh --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n回放：./run.sh --mode execute --case-file 用例.xlsx [--url 页面地址]\n原有Excel：./run.sh --excel 用例.xlsx --url 页面地址 [--cases 001,002]\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。\n--no-auth-reuse 禁用缓存登录态（访客视角走查公开页时使用）。');return;}
  if(!config.excel&&!arg('--mode',''))throw Error('请通过--excel指定用例文件');
  if(!['local','api'].includes(config.provider))throw Error('--provider仅支持local或api，默认local');
  if(config.provider==='api'&&(!config.apiBase||!config.apiModel))throw Error('API模式需配置 LAYA_API_BASE 和 LAYA_API_MODEL');
@@ -89,12 +89,29 @@ async function main(){
  await engine.navigate(config.url);
  if(config.manualLogin){const rl=readline.createInterface({input:process.stdin,output:process.stdout});await rl.question('请在浏览器完成登录，回到终端按回车继续：');rl.close();await engine.navigate(config.url);config.authenticated=await page.locator('input[type="password"]:visible').count()===0;}
  else if(password){
-  await page.locator('input[type="password"]:visible').first().waitFor({timeout:30000});
+  // 已登录检测：storageState 有效时页面无密码框，跳过登录。
+  // 注意：会话过期时目标页会在水合后才延迟重定向到登录页（可 >5s），
+  // 仅等密码框会误判「已登录」→ 场景循环跑在登录页上（快照全空级联失败）。
+  let needLogin=false;try{await page.locator('input[type="password"]:visible').first().waitFor({timeout:5000});needLogin=true;}
+  catch{
+   await page.waitForTimeout(3000);
+   if(/login/i.test(new URL(page.url()).pathname)){needLogin=true;console.log('登录态已过期（重定向到 '+page.url()+'），重新登录');}
+   else console.log('检测到有效登录态，跳过登录');
+  }
+  if(needLogin){await page.locator('input[type="password"]:visible').first().waitFor({timeout:30000});}
+  if(needLogin){
   console.log('页面语言：'+await switchLanguage(page,config.language));
-  const account=await engine.chooseTarget('账号 Account Username','fill');await account.locator.fill(config.user);
+  // 确定性登录：登录页结构固定（email+password+submit），不经 LLM 决策（避免措辞抖动，
+  // 且账号框文案如「管理员邮箱/邮箱地址」与通用意图「账号」不总匹配）
+  const account=page.locator('input[type="email"]:visible').first();if(await account.count()===0)throw Error('登录页未找到 email 输入框，请用 --manual-login');await account.fill(config.user);
   const passwords=page.locator('input[type="password"]:visible');if(await passwords.count()!==1)throw Error('登录页存在多个密码框，请用--manual-login');
   await passwords.fill(password);password=null;
-  const button=await engine.chooseTarget('登录 Login Sign in');await button.locator.click();await passwords.waitFor({state:'hidden',timeout:30000});await engine.navigate(config.url);config.authenticated=true;
+  await page.locator('button[type="submit"]:visible').first().click({timeout:5000}).catch(()=>{});await passwords.waitFor({state:'hidden',timeout:30000});await engine.navigate(config.url);
+  if(/login/i.test(new URL(page.url()).pathname))throw Error('自动登录后仍停留在登录页（'+page.url()+'），可能是凭据无效或被限流，请检查 TEST_USER/TEST_PASSWORD');
+  // token 在 sessionStorage（storageState 不含），另存快照供下次回放 addInitScript 注入，免重复登录撞限流
+  try{const {writeFileSync}=await import('node:fs');const {createHash}=await import('node:crypto');const snap=await page.evaluate(()=>{const o={};for(let i=0;i<sessionStorage.length;i++){const k=sessionStorage.key(i);o[k]=sessionStorage.getItem(k);}return o;});const sf='.laya-auth/'+createHash('sha256').update(String(config.user)).digest('hex').slice(0,16)+'.session.json';writeFileSync(sf,JSON.stringify(snap));console.log('登录态快照已保存：'+sf);}catch(e){console.log('登录态快照保存失败（不影响本次）：'+String(e?.message||e).slice(0,80));}
+  config.authenticated=true;
+  }
  }
  // Never record login/password entry in Playwright traces.
  await context.tracing.start({screenshots:true,snapshots:true,sources:false});const results=[];
