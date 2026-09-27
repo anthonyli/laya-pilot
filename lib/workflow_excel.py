@@ -24,9 +24,12 @@ TITLES = {'tabs': '页签入口可见', 'tab-switch': '页签切换后可见并�
           'form-invalid': '数值区间示例的非法括号触发校验',
           'create': '新增独立测试记录', 'search': '按名称查询刚创建的记录',
           'view': '查看独立测试记录', 'edit': '修改独立测试记录名称',
-          'delete': '删除独立测试记录'}
+          'delete': '删除独立测试记录',
+          'bind-key': '为独立测试记录绑定API Key',
+          'test-connectivity': '对独立测试记录发起真实网关联通测试'}
 OPERATIONS = {'create': '新增', 'search': '查询', 'view': '查看',
-              'edit': '修改', 'delete': '删除'}
+              'edit': '修改', 'delete': '删除',
+              'bind-key': '绑定Key', 'test-connectivity': '连通测试'}
 
 
 def cell_text(value):
