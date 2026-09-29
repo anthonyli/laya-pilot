@@ -1,8 +1,14 @@
 {
     "url": "http://127.0.0.1:8765/customers",
     "provider": "local",
+    "lazyModel": false,
     "browserProvider": "playwright",
     "browserChannel": "",
     "headless": false,
-    "language": "auto"
+    "language": "auto",
+    "operations": ["table", "filters", "create", "search", "view", "edit", "delete"],
+    "data": {},
+    "authState": "",
+    "authCheck": "",
+    "authSessionStorage": false
 }

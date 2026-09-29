@@ -8,6 +8,7 @@ __pycache__/
 .env.*
 !.env.example
 *.local.json
+*.local.sh
 config.json
 runs/
 generated-cases/
@@ -19,3 +20,5 @@ models/
 storage-state*.json
 test-results/
 playwright-report/
+
+.auth/
