@@ -22,6 +22,7 @@ test('sibling labels name input fields without renaming save/cancel buttons', as
         hasAttribute: () => false,
         setAttribute: () => {},
         closest: () => null,
+        querySelector: () => null,
         matches: () => false,
         getBoundingClientRect: () => ({ width: 100, height: 30 }),
         classList: { contains: () => false },
@@ -58,6 +59,7 @@ test('create retries use fresh refs and reach the second live entry', async () =
     let generation = 0;
     const clicked = [];
     const fake = {
+        checkInterrupted: () => {},
         page: quietPage(),
         snapshot: async () => {
             generation++;
