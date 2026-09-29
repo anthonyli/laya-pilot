@@ -1,10 +1,22 @@
-# LayaPilot · Intelligent Browser Test Automation
+# LayaPilot · Browser Test Automation for Enterprise Admin Applications
 
-[中文](README.md) · [Architecture and extension points](docs/architecture.md) · [Roadmap](ROADMAP.en.md)
+[中文](README.md) · [Local runtime guide (中文)](docs/local-runtime.md) · [Architecture and extension points](docs/architecture.md) · [Roadmap](ROADMAP.en.md)
 
-Generate **replayable Excel test cases from a live browser page**, or execute an existing natural-language Excel workbook. The current implementation uses Playwright for browser control and either local Laya or a compatible decision API to resolve ambiguous controls. Assertions inspect the resulting page; a model choice alone never counts as a passing test.
+Generate **replayable Excel test cases for enterprise admin applications** from a live browser page, or execute an existing natural-language Excel workbook. The focus is on tables, filters, forms and CRUD flows in modules such as user and customer management. Accuracy, speed and stability guide the implementation, with local or intranet inference preferred.
+
+The current implementation uses Playwright for browser control and either local Laya or a compatible decision API to interpret fields, select options and ground execution targets. Assertions inspect the resulting page; a model choice alone never counts as a passing test.
+
+Generation retains CRUD templates while Laya selects field data strategies and option groups. Equivalent options use a stable order; explicit `--data` values override generation. The default `discover` operation then evaluates extra candidates grounded in observed controls and constraints: empty search, filter reset, cancelling creation, email format and numeric bounds. Only executed, verified cases enter the replay workbook. This bounded discovery does not infer arbitrary business requirements; unsupported observed workflows remain in the report.
+
+Replay preserves recorded steps, values and expected results. Laya grounds clicks, text, date and select fields against the live page, including unique matches. Identical decisions can use the in-process cache. Rejected, low-confidence or different choices stop the step rather than changing test data. Saved text, dates and option paths are bound exactly after field matching. Pure assertions do not need model decisions.
+
+Both generation and replay write `runs/<run>/执行结果.xlsx`. Generation results are labelled as generation-time validation and retain failed or skipped attempts. `results.json` links this workbook through `resultFile`; decision phases `form-field`, `form-option`, `test-discovery` and `replay-target` distinguish generation and replay decisions. Model loading, inference calls and cache hits are reported separately.
 
 This public project includes a local demo, without company-specific adapters, internal URLs, accounts, or gateway settings. **Only the Playwright browser driver and the Laya decision protocol are implemented today.** browser-use and Jev API are listed in the [Roadmap](ROADMAP.en.md), not available backends yet.
+
+Generation/replay supports `--operations create,delete` or `--read-only` to limit scope. The local model preloads by default alongside browser setup, with a readiness gate before testing; `--lazy-model` opts into loading on demand. `--auth-state .auth/tester.json --auth-check '#authenticated-user'` persists cookies, localStorage and IndexedDB after a unique authenticated-page marker passes; add `--auth-session-storage` when required. State is bound to origin and account, and expiry fails or reauthenticates explicitly.
+
+Workflow runs save an atomic `checkpoint.json` and `progress.ndjson`, preserve partial results on SIGINT/SIGTERM, and return nonzero on failure or empty coverage. Uncertain writes are never blindly resent. Checkpoints support reconciliation, not automatic resume. See the [runtime guide](docs/local-runtime.md) for boundaries and the [Browser Use evaluation](docs/browser-use-evaluation.md) for the current adoption decision.
 
 ![Customer management page in the public demo](docs/demo.png)
 
@@ -95,6 +107,8 @@ On its first run, `uv tool run` obtains the pinned Ruff version and caches it fo
 
 ```bash
 npm test
+python3 -m unittest discover -s tests -p 'test_*.py'
+LAYA_TEST_PYTHON=/path/to/python-with-openpyxl npm run test:browser
 ```
 
 Control discovery uses DOM, labels, ARIA roles and some common component classes. It re-observes dynamic DOM, but Canvas controls, closed Shadow DOM, unlabeled custom widgets, and cross-account workflows need adapters. See the [architecture guide](docs/architecture.md) for extension points and current boundaries.
