@@ -73,3 +73,26 @@ test('generated input values use visible interval examples and fresh-record vari
     assert.equal(invalidExampleValue('数值区间, 例如[0, 100)'), '【0, 100)');
     assert.equal(invalidExampleValue('普通文本'), null);
 });
+
+test('confirm-as-save is restricted to a form and an allowed write/validation case', () => {
+    const generated = file();
+    generated.cases = [
+        {
+            id: 'required',
+            operation: 'form-validation',
+            steps: [
+                {
+                    kind: 'click',
+                    purpose: 'save',
+                    target: { name: '确定', role: 'button', scope: 'form' },
+                },
+            ],
+        },
+    ];
+    assert.equal(validateWorkflow(generated).cases.length, 1);
+    generated.cases[0].steps[0].target.scope = 'page';
+    assert.throws(() => validateWorkflow(generated), /当前表单/);
+    generated.cases[0].steps[0].target.scope = 'form';
+    generated.cases[0].operation = 'table';
+    assert.throws(() => validateWorkflow(generated), /保存步骤/);
+});

@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import readline from 'node:readline/promises';
-import { Laya } from './lib/model.mjs';
+import { Laya, beginModelWarmup, waitModelWarmup } from './lib/model.mjs';
+import { resultExitCode } from './lib/run-state.mjs';
+import { ensureAuthentication, saveAuthState } from './lib/auth-state.mjs';
 import { openBrowser } from './lib/browser-provider.mjs';
 import {
     loadLocalEnvironment,
@@ -13,7 +14,6 @@ import {
 import { Engine } from './lib/engine.mjs';
 import { describe, expectation, lines } from './lib/language.mjs';
 import { settle } from './lib/dom.mjs';
-import { switchLanguage } from './lib/readiness.mjs';
 const ROOT = path.dirname(fileURLToPath(import.meta.url)),
     args = process.argv.slice(2);
 const arg = (n, d) => {
@@ -34,6 +34,7 @@ const config = {
     python: option('--python', 'LAYA_PYTHON', 'python', path.join(ROOT, '.venv', 'bin', 'python')),
     model: option('--model', 'LAYA_MODEL', 'model', 'convaiinnovations/laya-multilingual'),
     provider: option('--provider', 'LAYA_PROVIDER', 'provider', 'local'),
+    lazyModel: configuredFlag(args, '--lazy-model', null, fileConfig.lazyModel),
     apiBase: option('--api-base', 'LAYA_API_BASE', 'apiBase', ''),
     apiModel: option('--api-model', 'LAYA_API_MODEL', 'apiModel', ''),
     apiTimeout: Number(option('--api-timeout', 'LAYA_API_TIMEOUT', 'apiTimeout', 30000)),
@@ -44,6 +45,16 @@ const config = {
         'playwright',
     ),
     browserChannel: option('--browser-channel', 'BROWSER_CHANNEL', 'browserChannel', ''),
+    authState: option('--auth-state', 'TEST_AUTH_STATE', 'authState', ''),
+    authCheck: option('--auth-check', 'TEST_AUTH_CHECK', 'authCheck', ''),
+    authReset: flag('--auth-reset'),
+    authSessionStorage: configuredFlag(
+        args,
+        '--auth-session-storage',
+        null,
+        fileConfig.authSessionStorage,
+    ),
+    operations: option('--operations', null, 'operations', ''),
     headless: configuredFlag(args, '--headless', 'BROWSER_HEADLESS', fileConfig.headless),
     allowWrite: flag('--allow-write') && !flag('--read-only'),
     readOnly: flag('--read-only'),
@@ -60,7 +71,7 @@ const config = {
     minProbability: Number(arg('--min-probability', '0.68')),
     minMargin: Number(arg('--min-margin', '0.18')),
     cases: arg('--cases', '').split(',').filter(Boolean),
-    data: {},
+    data: fileConfig.data || {},
     runId,
     out: path.resolve(option('--out', 'TEST_OUTPUT', 'out', path.join(ROOT, 'runs', runId))),
 };
@@ -114,6 +125,7 @@ async function report(results, laya, source, warnings) {
         mode: config.headless ? 'headless' : 'headed',
         provider: config.provider,
         model: config.provider === 'api' ? config.apiModel : config.model,
+        modelStartup: laya.startup || null,
         ...(config.provider === 'api' ? { api_base: config.apiBase } : {}),
         engine:
             '通用DOM候选 + ' +
@@ -182,6 +194,15 @@ async function main() {
         console.log(
             'LayaPilot\n生成：./run.sh --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n回放：./run.sh --mode execute --case-file 用例.xlsx [--url 页面地址]\n原有Excel：./run.sh --excel 用例.xlsx --url 页面地址 [--cases 001,002]\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。',
         );
+        console.log(
+            '--auth-state 文件：保存/复用登录态；--auth-reset：重新登录；--auth-check CSS：登录成功标记；--auth-session-storage：保存当前站点 sessionStorage',
+        );
+        console.log(
+            '--operations tabs,tab-switch,table,filters,form-validation,form-invalid,create,search,view,edit,delete,discover；discover：模板完成后由模型选择补充测试；--read-only：只读检查；--data JSON文件：明确覆盖字段值',
+        );
+        console.log(
+            '本地模型默认启动预热，与浏览器准备并行；--lazy-model 改为按需加载。退出码：0 全部选中用例通过（不适用除外），1 失败/阻断/无用例，130 SIGINT，143 SIGTERM。',
+        );
         return;
     }
     if (!config.excel && !arg('--mode', '')) throw Error('请通过--excel指定用例文件');
@@ -204,6 +225,13 @@ async function main() {
         if (!Number.isFinite(config[key]) || config[key] < 0) throw Error('参数无效：' + key);
     if (!['auto', 'zh-CN', 'en', 'none'].includes(config.language))
         throw Error('--language仅支持auto、zh-CN、en、none');
+    if (!config.data || typeof config.data !== 'object' || Array.isArray(config.data))
+        throw Error('data 必须是 JSON 对象');
+    if (config.authState && !config.authCheck)
+        throw Error('--auth-state 需要 --auth-check 指定登录成功后的唯一页面标记');
+    if ((config.authReset || config.authSessionStorage) && !config.authState)
+        throw Error('--auth-reset / --auth-session-storage 需要 --auth-state');
+    if (!arg('--mode', '') && config.operations) throw Error('--operations 仅用于生成和回放');
     if (arg('--labels', '')) {
         config.labels = JSON.parse(await fs.readFile(arg('--labels', ''), 'utf8'));
         if (
@@ -229,7 +257,9 @@ async function main() {
             config.excel || '',
         );
         const { runWorkflow } = await import('./lib/workflow.mjs');
-        return runWorkflow(config, workflowMode, secret, ROOT);
+        const summary = await runWorkflow(config, workflowMode, secret, ROOT);
+        process.exitCode = summary.exitCode;
+        return summary;
     }
     await fs.mkdir(path.join(config.out, 'evidence'), { recursive: true });
     let apiKey =
@@ -318,45 +348,23 @@ async function main() {
     if (config.language === 'auto')
         config.language = selected.some((c) => /[\u4e00-\u9fff]/.test(c.steps)) ? 'zh-CN' : 'en';
     if (config.manualLogin && config.headless) throw Error('手动登录需要可见浏览器');
-    let password = config.user && !config.manualLogin ? await secret() : null;
-    console.log(
-        config.provider === 'api'
-            ? '使用API Laya：' + config.apiModel + ' @ ' + config.apiBase + '（不加载本地模型）'
-            : '加载本地Laya...',
-    );
-    const loaded = await laya.request({ action: 'load' });
-    console.log(
-        (config.provider === 'api' ? 'API连接验证完成 ' : '本地模型已加载 ') +
-            loaded.load_ms +
-            'ms',
-    );
-    const { browser: opened, context, page } = await openBrowser(config);
+
+    const modelWarmup = beginModelWarmup(laya, config);
+    const { browser: opened, context, page, authRestored } = await openBrowser(config);
     browser = opened;
     activePage = page;
     const engine = new Engine(page, laya, config);
     await engine.navigate(config.url);
-    if (config.manualLogin) {
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        await rl.question('请在浏览器完成登录，回到终端按回车继续：');
-        rl.close();
-        await engine.navigate(config.url);
-        config.authenticated = (await page.locator('input[type="password"]:visible').count()) === 0;
-    } else if (password) {
-        await page.locator('input[type="password"]:visible').first().waitFor({ timeout: 30000 });
-        console.log('页面语言：' + (await switchLanguage(page, config.language)));
-        const account = await engine.chooseTarget('账号 Account Username', 'fill');
-        await account.locator.fill(config.user);
-        const passwords = page.locator('input[type="password"]:visible');
-        if ((await passwords.count()) !== 1)
-            throw Error('登录页存在多个密码框，请用--manual-login');
-        await passwords.fill(password);
-        password = null;
-        const button = await engine.chooseTarget('登录 Login Sign in');
-        await button.locator.click();
-        await passwords.waitFor({ state: 'hidden', timeout: 30000 });
-        await engine.navigate(config.url);
-        config.authenticated = true;
-    }
+    const authStatus = await ensureAuthentication(
+        page,
+        config,
+        secret,
+        (name, kind) => engine.chooseTarget(name, kind),
+        authRestored,
+    );
+    config.authenticated = authStatus !== 'not-required';
+    await saveAuthState(context, page, config);
+    await waitModelWarmup(modelWarmup);
     // Never record login/password entry in Playwright traces.
     await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
     const results = [];
@@ -414,8 +422,9 @@ async function main() {
                 metrics: summary.metrics,
             }),
     );
+    process.exitCode = resultExitCode(results);
     laya.close();
-    if (config.keepOpen) {
+    if (config.keepOpen && !config.headless) {
         console.log('浏览器保留，关闭窗口后退出。');
         await new Promise((resolve) => browser.on('disconnected', resolve));
     } else await browser.close();
@@ -439,5 +448,5 @@ main().catch(async (e) => {
             .catch(() => {});
     laya?.close();
     await browser?.close().catch(() => {});
-    process.exitCode = 1;
+    process.exitCode = e.exitCode || 1;
 });

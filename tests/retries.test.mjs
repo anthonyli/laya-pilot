@@ -21,6 +21,7 @@ function setup() {
         diagnostics,
     );
     workflow.modalPresent = async () => false;
+    workflow.assertModuleAccess = async () => {};
     workflow.case = { id: 'test', operation: 'create', steps: [], attempts: [] };
     return { page, workflow };
 }
@@ -151,6 +152,7 @@ test('write verification requires matching page, successful request and expected
     const { workflow, page } = setup();
     workflow.attemptState = { writeSequence: 0 };
     workflow.snapshot = async () => ({ controls: [{ name: '新增' }] });
+    page.getByText = () => ({});
     page.locator = () => ({ filter: () => ({ count: async () => 1 }) });
     const step = { purpose: 'save' };
     assert.equal(await workflow.verifyWrite(step), false);
@@ -158,6 +160,22 @@ test('write verification requires matching page, successful request and expected
     assert.equal(await workflow.verifyWrite(step), true);
     page.url = () => 'https://app.test/login';
     assert.equal(await workflow.verifyWrite(step), false);
+});
+
+test('an unresolved write blocks later mutation without discarding its identity', async () => {
+    const { workflow } = setup();
+    const pending = { caseId: 'previous', operation: 'form-validation' };
+    workflow.pendingWrite = pending;
+    let clicks = 0;
+    await assert.rejects(
+        workflow.dispatchClick(
+            { click: async () => clicks++ },
+            { purpose: 'save', target: { name: '保存' } },
+        ),
+        /未确认写入/,
+    );
+    assert.equal(clicks, 0);
+    assert.equal(workflow.pendingWrite, pending);
 });
 
 test('generation reports a failed case and still runs a subsequent case', async () => {

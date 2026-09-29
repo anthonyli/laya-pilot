@@ -45,6 +45,7 @@ TITLES = {
     'view': '查看独立测试记录',
     'edit': '修改独立测试记录名称',
     'delete': '删除独立测试记录',
+    'discover': '模型发现的补充测试',
 }
 OPERATIONS = {'create': '新增', 'search': '查询', 'view': '查看', 'edit': '修改', 'delete': '删除'}
 
@@ -67,6 +68,23 @@ def step_text(step):
     kind = step['kind']
     target = step.get('target', {}).get('name', '')
     value = step.get('value', '')
+    if kind == 'assert-discovery':
+        spec = step['spec']
+        check = spec['check']
+        if check == 'filter-empty':
+            search = (
+                f'点击「{spec["search"]["name"]}」' if spec.get('search') else '等待输入触发筛选'
+            )
+            return (
+                f'在「{spec["field"]["name"]}」输入本轮唯一不存在的关键词，{search}，核对列表为空'
+            )
+        if check == 'filter-reset':
+            return f'先查询不存在的关键词并核对列表为空，再点击「{spec["reset"]["name"]}」，核对条件清空且原列表记录恢复'
+        if check == 'cancel-create':
+            return f'点击「{spec["create"]["name"]}」，填写「{spec["label"]}」，点击「{spec["cancel"]["name"]}」，核对弹窗关闭且刷新后没有新增记录'
+        if check == 'field-invalid':
+            return f'打开新增表单，向「{spec["label"]}」输入违反 {spec["constraint"]}={spec.get("bound", "邮箱格式")} 的值，核对浏览器约束校验失败，再取消（不提交）'
+        raise ValueError('不支持的补充测试：' + check)
     if kind == 'click':
         return f'点击「{target}」' + (
             '（本轮记录所在行）' if step.get('target', {}).get('scope') == 'owned-row' else ''
@@ -81,6 +99,8 @@ def step_text(step):
         return f'在必填输入框「{step["target"]["placeholder"]}」第{step["target"]["index"] + 1}项输入「{value}」'
     if kind == 'form-select':
         return f'在表单「{step["target"]["label"]}」依次选择：' + ' → '.join(step['path'])
+    if kind == 'form-date':
+        return f'在表单「{step["target"]["label"]}」选择日期「{value}」'
     if kind == 'assert-form-errors':
         return '核对表单未关闭，必填字段显示校验错误：' + '、'.join(value)
     if kind == 'assert-input-invalid':
@@ -185,7 +205,7 @@ def write(payload):
             f'{index - 1:03d}',
             module,
             module,
-            f'{module} - {TITLES[case["operation"]]}',
+            f'{module} - {case.get("title") or TITLES[case["operation"]]}',
             '中',
             '正案例',
             '功能',
@@ -260,6 +280,77 @@ def read(payload):
     }
 
 
+def report(payload):
+    """All attempted cases, including generation failures and interrupted runs."""
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    from openpyxl.styles import Alignment, Font
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = '生成验证结果' if payload['mode'] == 'generate' else '执行结果'
+    sheet.append(HEADERS)
+    sheet.freeze_panes = 'A2'
+    sheet.auto_filter.ref = f'A1:Q{max(1, len(payload["results"]) + 1)}'
+    stage = '生成时验证' if payload['mode'] == 'generate' else '回放执行'
+    run_at = (
+        datetime.fromisoformat(payload['runAt'].replace('Z', '+00:00'))
+        .astimezone()
+        .replace(tzinfo=None)
+        if payload.get('runAt')
+        else datetime.now()
+    )
+    for i, result in enumerate(payload['results'], 1):
+        status = result['status']
+        steps = result.get('steps', [])
+        texts = [step_text(s) for s in steps]
+        assertions = [step_text(s) for s in steps if s['kind'].startswith('assert-')]
+        notes = [stage, result.get('reason', '')]
+        if result.get('evidence'):
+            notes.append('证据：' + result['evidence'])
+        if result.get('diagnosis', {}).get('category') if result.get('diagnosis') else False:
+            notes.append('原因分类：' + result['diagnosis']['category'])
+        values = [
+            result.get('id', str(i)),
+            payload.get('moduleUrl', ''),
+            '',
+            result.get('title', ''),
+            '中',
+            '负案例' if result.get('operation') in ('form-validation', 'form-invalid') else '功能',
+            result.get('operation', ''),
+            '已登录并进入目标模块',
+            '\n'.join(texts),
+            '\n'.join(assertions),
+            'pass'
+            if status in ('已验证', '通过')
+            else 'skip'
+            if status in ('不适用', '未执行（依赖阻断）')
+            else 'fail',
+            '',
+            status,
+            stage,
+            run_at,
+            '\n'.join(notes),
+            '',
+        ]
+        sheet.append(
+            [ILLEGAL_CHARACTERS_RE.sub('', v) if isinstance(v, str) else v for v in values]
+        )
+        for cell in sheet[i + 1]:
+            if isinstance(cell.value, str):
+                cell.data_type = 's'
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+        sheet.row_dimensions[i + 1].height = min(300, max(45, len(texts) * 18))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    for i in range(1, 18):
+        sheet.column_dimensions[get_column_letter(i)].width = (
+            60 if i in (9, 10, 16) else 24 if i in (2, 4) else 16
+        )
+    Path(payload['output']).parent.mkdir(parents=True, exist_ok=True)
+    book.save(payload['output'])
+    return {'path': payload['output'], 'cases': len(payload['results'])}
+
+
 def results(payload):
     book = load_workbook(payload['path'])
     sheet = book['生成用例']
@@ -331,7 +422,9 @@ def results(payload):
 if __name__ == '__main__':
     try:
         data = json.load(sys.stdin)
-        result = {'write': write, 'read': read, 'results': results}[sys.argv[1]](data)
+        result = {'write': write, 'read': read, 'results': results, 'report': report}[sys.argv[1]](
+            data
+        )
         print(json.dumps(result, ensure_ascii=False))
     except Exception as exc:
         print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
