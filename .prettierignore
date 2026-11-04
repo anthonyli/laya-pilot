@@ -11,6 +11,7 @@ validation/
 test-results/
 playwright-report/
 package-lock.json
+skills/laya-pilot/runtime/package-lock.json
 .env
 .env.*
 *.local.json

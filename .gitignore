@@ -20,5 +20,6 @@ models/
 storage-state*.json
 test-results/
 playwright-report/
+dist/laya-pilot-skill.zip
 
 .auth/

@@ -1,0 +1,18 @@
+{
+    "name": "laya-pilot-skill-runtime",
+    "version": "0.1.0",
+    "description": "Run browser regression tests from existing Excel cases for enterprise admin applications",
+    "license": "MIT",
+    "engines": {
+        "node": ">=20"
+    },
+    "type": "module",
+    "dependencies": {
+        "playwright": "1.62.1"
+    },
+    "private": true,
+    "scripts": {
+        "start": "node runner.mjs",
+        "demo": "node examples/demo-server.mjs"
+    }
+}

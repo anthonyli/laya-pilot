@@ -2,7 +2,7 @@
     "name": "laya-pilot",
     "version": "0.1.0",
     "private": false,
-    "description": "Generate and replay Excel browser tests for enterprise admin applications",
+    "description": "Run browser regression tests from existing Excel cases for enterprise admin applications",
     "license": "MIT",
     "engines": {
         "node": ">=20"
@@ -18,6 +18,8 @@
         "test": "node --test --test-concurrency=1 tests/*.test.mjs",
         "test:browser": "node --test tests/browser/*.test.mjs",
         "test:model": "node --test tests/real-model.smoke.mjs",
+        "skill:package": "uv run --no-project python scripts/package_skill.py",
+        "skill:check": "uv run --no-project python scripts/package_skill.py --check",
         "start": "node runner.mjs",
         "demo": "node examples/demo-server.mjs"
     },

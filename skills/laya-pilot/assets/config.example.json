@@ -1,0 +1,12 @@
+{
+    "url": "",
+    "excel": "",
+    "provider": "api",
+    "browserProvider": "playwright",
+    "headless": false,
+    "language": "auto",
+    "data": {},
+    "authState": "",
+    "authCheck": "",
+    "authSessionStorage": false
+}

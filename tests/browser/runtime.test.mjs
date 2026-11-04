@@ -71,6 +71,16 @@ before(async () => {
             res.end(authPage);
             return;
         }
+        if (req.url === '/generic-filter' || req.url === '/ambiguous-filter') {
+            const inputs =
+                req.url === '/generic-filter'
+                    ? '<input placeholder="Enter search content">'
+                    : '<input placeholder="First value"><input placeholder="Second value">';
+            res.end(
+                `${inputs}<button>Search</button><button>Reset</button><table><thead><tr><th>Indicator</th><th>Status</th></tr></thead><tbody><tr><td>Example</td><td>Ready</td></tr></tbody></table>`,
+            );
+            return;
+        }
         if (req.url === '/boundaries') {
             res.end(`<!doctype html><button onclick="document.querySelector('dialog').showModal()">新增</button>
               <table><thead><tr><th>名称</th><th>状态</th></tr></thead><tbody><tr><td>原记录</td><td>正常</td></tr></tbody></table>
@@ -159,7 +169,7 @@ test('native icon buttons use live tooltips and keep text-labelled actions intac
     }
 });
 
-async function cli(name, args, interruptOnWrite = false) {
+async function cli(name, args, interruptOnWrite = false, extraEnv = {}) {
     const directory = path.join(out, name);
     const child = spawn(
         process.execPath,
@@ -188,6 +198,7 @@ async function cli(name, args, interruptOnWrite = false) {
                 BROWSER_PROVIDER: 'playwright',
                 BROWSER_CHANNEL: '',
                 TEST_TEMPLATE_EXCEL: '',
+                ...extraEnv,
             },
             stdio: ['ignore', 'pipe', 'pipe'],
         },
@@ -210,7 +221,12 @@ async function cli(name, args, interruptOnWrite = false) {
     assert.equal(signal, null, output);
     const summary = JSON.parse(await fs.readFile(path.join(directory, 'results.json'), 'utf8'));
     assert.equal(code, summary.exitCode, output);
-    assert.equal(await fs.stat(path.join(directory, 'trace.zip')).then((x) => x.size > 0), true);
+    if (summary.failureStage !== 'authentication')
+        assert.equal(
+            await fs.stat(path.join(directory, 'trace.zip')).then((x) => x.size > 0),
+            true,
+        );
+    else await assert.rejects(fs.access(path.join(directory, 'trace.zip')), { code: 'ENOENT' });
     assert.equal(
         await fs.access(path.join(directory, '.run.lock')).then(
             () => true,
@@ -482,8 +498,90 @@ test(
         ]);
         assert.equal(result.code, 1);
         assert.match(result.summary.error, /无访问权限/);
-        assert.deepEqual(result.summary.results, []);
+        assert.equal(result.summary.results[0].status, '阻断');
         assert.ok(result.summary.runEvidence);
+    },
+);
+
+test(
+    'login failures preserve masked evidence and a consistent blocked report without credentials',
+    { timeout: 30000 },
+    async () => {
+        const password = 'fixture wrong password with spaces';
+        const result = await cli(
+            'login-failure',
+            [
+                '--mode',
+                'generate',
+                '--url',
+                base + '/auth',
+                '--user',
+                'tester',
+                '--language',
+                'none',
+                '--page-timeout',
+                '700',
+                '--read-only',
+            ],
+            false,
+            { TEST_PASSWORD: password },
+        );
+        assert.equal(result.code, 1);
+        assert.equal(result.summary.authStatus, 'failed');
+        assert.equal(result.summary.failureStage, 'authentication');
+        assert.deepEqual(result.summary.counts, { 阻断: 1 });
+        assert.ok(result.summary.runEvidence);
+        assert.ok(
+            (await fs.stat(path.join(result.directory, result.summary.runEvidence))).size > 0,
+        );
+        assert.equal(result.summary.results[0].evidence, result.summary.runEvidence);
+        const checkpoint = JSON.parse(
+            await fs.readFile(path.join(result.directory, 'checkpoint.json'), 'utf8'),
+        );
+        assert.equal(checkpoint.results[0].status, '阻断');
+        const md = await fs.readFile(path.join(result.directory, '报告.md'), 'utf8');
+        assert.ok(!result.output.includes(password));
+        assert.ok(!JSON.stringify(result.summary).includes(password));
+        assert.ok(!md.includes(password));
+        assert.match(md, /登录状态：failed/);
+    },
+);
+
+test(
+    'generic search placeholders are covered; ambiguous filters are explicitly unexecuted',
+    { timeout: 30000 },
+    async () => {
+        const covered = await cli('generic-filter', [
+            '--mode',
+            'generate',
+            '--url',
+            base + '/generic-filter',
+            '--read-only',
+            '--case-file',
+            path.join(out, 'generic-filter.xlsx'),
+        ]);
+        assert.equal(covered.code, 0, covered.output);
+        assert.equal(
+            covered.summary.results.find((c) => c.operation === 'filters').status,
+            '已验证',
+        );
+        assert.ok(
+            covered.summary.results
+                .find((c) => c.operation === 'filters')
+                .steps.some((s) => s.target?.name === 'Enter search content'),
+        );
+        const missing = await cli('ambiguous-filter', [
+            '--mode',
+            'generate',
+            '--url',
+            base + '/ambiguous-filter',
+            '--operations',
+            'filters',
+        ]);
+        assert.equal(missing.code, 1, missing.output);
+        assert.equal(missing.summary.results[0].status, '未执行（控件未识别）');
+        assert.match(missing.summary.results[0].reason, /未覆盖筛选/);
+        assert.equal(missing.summary.caseFile, null);
     },
 );
 

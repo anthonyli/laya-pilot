@@ -21,12 +21,13 @@ class ImportResultTest(unittest.TestCase):
         ws.append(['1', '点击查询', '页面显示结果', 'pass', '未执行'])
         ws.append(['2', '点击查询', 'pass', 'fail', '已执行'])
         ws.append(['3', '点击查询', '页面显示结果', '废弃', '已执行'])
+        ws.append(['4', '点击查询', '页面显示结果', '', '未执行'])
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / 'input.xlsx'
             wb.save(filename)
             cases = worker.read_excel(filename)['cases']
-        self.assertEqual([c['source_result'] for c in cases], ['pass', 'fail', '废弃'])
-        self.assertEqual([c['id'] for c in cases if c['source_result'] == 'pass'], ['001'])
+        self.assertEqual([c['source_result'] for c in cases], ['pass', 'fail', '废弃', ''])
+        self.assertEqual([c['id'] for c in cases], ['001', '002', '003', '004'])
 
 
 if __name__ == '__main__':

@@ -33,6 +33,7 @@ HEADERS = [
     '是否提bug',
 ]
 META = '__laya_steps__'
+WORKFLOW_ID = 'laya-pilot:workflow:v1'
 TITLES = {
     'tabs': '页签入口可见',
     'tab-switch': '页签切换后可见并可切回',
@@ -160,6 +161,7 @@ def write(payload):
 
     source, old = load_template(payload.get('template'))
     book = Workbook()
+    book.properties.identifier = WORKFLOW_ID
     sheet = book.active
     sheet.title = '生成用例'
     sheet.sheet_view.showGridLines = old.sheet_view.showGridLines
@@ -248,6 +250,15 @@ def write(payload):
     book.save(payload['path'])
     source.close()
     return {'path': payload['path'], 'cases': len(file['cases'])}
+
+
+def detect(payload):
+    book = load_workbook(payload['path'], read_only=True, data_only=False)
+    try:
+        marked = str(book.properties.identifier or '').startswith('laya-pilot:workflow:')
+        return {'format': 'structured' if META in book or marked else 'natural-language'}
+    finally:
+        book.close()
 
 
 def read(payload):
@@ -422,9 +433,13 @@ def results(payload):
 if __name__ == '__main__':
     try:
         data = json.load(sys.stdin)
-        result = {'write': write, 'read': read, 'results': results, 'report': report}[sys.argv[1]](
-            data
-        )
+        result = {
+            'write': write,
+            'read': read,
+            'detect': detect,
+            'results': results,
+            'report': report,
+        }[sys.argv[1]](data)
         print(json.dumps(result, ensure_ascii=False))
     except Exception as exc:
         print(f'{type(exc).__name__}: {exc}', file=sys.stderr)

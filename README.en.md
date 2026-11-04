@@ -1,116 +1,136 @@
-# LayaPilot · Browser Test Automation for Enterprise Admin Applications
+# LayaPilot · Browser Tests for Enterprise Admin Applications
 
-[中文](README.md) · [Local runtime guide (中文)](docs/local-runtime.md) · [Architecture and extension points](docs/architecture.md) · [Roadmap](ROADMAP.en.md)
+[中文](README.md) · [Workflow guide](skills/laya-pilot/references/workflows.md) · [Architecture](docs/architecture.md) · [Roadmap](ROADMAP.en.md)
 
-Generate **replayable Excel test cases for enterprise admin applications** from a live browser page, or execute an existing natural-language Excel workbook. The focus is on tables, filters, forms and CRUD flows in modules such as user and customer management. Accuracy, speed and stability guide the implementation, with local or intranet inference preferred.
+Run browser regression tests from Excel, preserving the original steps and expected results, with reports and failure evidence. LayaPilot can also generate new cases after executing and verifying them. It focuses on admin pages with tables, filters, forms, and CRUD operations.
 
-The current implementation uses Playwright for browser control and either local Laya or a compatible decision API to interpret fields, select options and ground execution targets. Assertions inspect the resulting page; a model choice alone never counts as a passing test.
+**The AI skill is the recommended way to use LayaPilot.** An AI assistant helps with configuration, login, execution, and report analysis. You can also run the repository's `run.sh` yourself.
 
-Generation retains CRUD templates while Laya selects field data strategies and option groups. Equivalent options use a stable order; explicit `--data` values override generation. The default `discover` operation then evaluates extra candidates grounded in observed controls and constraints: empty search, filter reset, cancelling creation, email format and numeric bounds. Only executed, verified cases enter the replay workbook. This bounded discovery does not infer arbitrary business requirements; unsupported observed workflows remain in the report.
+Both options require **Node.js 20+ with npm and Python 3.10+ with venv/pip**. API mode needs no GPU or local model weights.
 
-Replay preserves recorded steps, values and expected results. Laya grounds clicks, text, date and select fields against the live page, including unique matches. Identical decisions can use the in-process cache. Rejected, low-confidence or different choices stop the step rather than changing test data. Saved text, dates and option paths are bound exactly after field matching. Pure assertions do not need model decisions.
+## Option 1: Use the skill (recommended)
 
-Both generation and replay write `runs/<run>/执行结果.xlsx`. Generation results are labelled as generation-time validation and retain failed or skipped attempts. `results.json` links this workbook through `resultFile`; decision phases `form-field`, `form-option`, `test-discovery` and `replay-target` distinguish generation and replay decisions. Model loading, inference calls and cache hits are reported separately.
+### 1. Install the complete skill directory
 
-This public project includes a local demo, without company-specific adapters, internal URLs, accounts, or gateway settings. **Only the Playwright browser driver and the Laya decision protocol are implemented today.** browser-use and Jev API are listed in the [Roadmap](ROADMAP.en.md), not available backends yet.
+Copy the entire [skills/laya-pilot/](skills/laya-pilot/) directory into your AI tool's skill installation directory, or install it after extracting a maintainer-provided `laya-pilot-skill.zip`. [SKILL.md](skills/laya-pilot/SKILL.md) is the entry point. Runtime code is included, so the original repository is not required.
 
-Generation/replay supports `--operations create,delete` or `--read-only` to limit scope. The local model preloads by default alongside browser setup, with a readiness gate before testing; `--lazy-model` opts into loading on demand. `--auth-state .auth/tester.json --auth-check '#authenticated-user'` persists cookies, localStorage and IndexedDB after a unique authenticated-page marker passes; add `--auth-session-storage` when required. State is bound to origin and account, and expiry fails or reauthenticates explicitly.
-
-Workflow runs save an atomic `checkpoint.json` and `progress.ndjson`, preserve partial results on SIGINT/SIGTERM, and return nonzero on failure or empty coverage. Uncertain writes are never blindly resent. Checkpoints support reconciliation, not automatic resume. See the [runtime guide](docs/local-runtime.md) for boundaries and the [Browser Use evaluation](docs/browser-use-evaluation.md) for the current adoption decision.
-
-![Customer management page in the public demo](docs/demo.png)
-
-## Introduction video
-
-https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d
-
-[Watch on YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
-
-## Features
-
-| Entry point       | What it does                                                                                     | Outputs                                    |
-| ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------ |
-| `--mode generate` | Explores tabs, tables, filters, form validation, and supported CRUD actions                      | 17-column XLSX, report, browser evidence   |
-| `--mode execute`  | Re-discovers DOM controls and replays a generated workbook                                       | Separate `执行结果.xlsx`, report, evidence |
-| `--excel`         | Executes supported steps from an existing workbook; selects source rows marked `pass` by default | JSON, CSV and Markdown reports             |
-
-Only flows that completed with a page assertion are written to a generated workbook. The visible steps and expected results follow the 17-column template; a hidden sheet holds structured replay steps. If the visible case changes without its replay steps, execution stops. Failures capture the failed step, page and console errors, HTTP 4xx/5xx events, and screenshots. Approval, multi-user permissions, file import, and arbitrary websites or prose cases are not universally supported.
-
-## Requirements and local Laya
-
-- Node.js **20+**, Python **3.10+** (3.11 or 3.12 recommended), and Playwright Chromium. Use `node runner.mjs` on macOS, Linux or Windows; `run.sh` is a macOS/Linux convenience script.
-- **We recommend installing official Laya locally** with the [`convaiinnovations/laya-multilingual`](https://huggingface.co/convaiinnovations/laya-multilingual) checkpoint for both Chinese and English pages. The first run downloads model files. Later runs can use the cache or a directory supplied through `LAYA_MODEL`. Do not commit weights.
-- **Practical recommendation, not an official minimum:** at least 4 CPU cores, **16 GB RAM**, and **5 GB free disk space** for local model + browser use; a discrete GPU is not required. We verified CPU operation on an Apple Silicon M4 with 16 GB RAM: the local model directory was about 647 MB and one initial load took about 27 seconds. Your machine may differ. API mode does not load Laya locally but still needs Node, a browser, Python, and `openpyxl`.
+Run once from the **installed skill directory**:
 
 ```bash
-git clone <your-repository-url> laya-pilot
+node scripts/setup.mjs
+```
+
+Setup installs Playwright, Chromium, and openpyxl, and creates these local files:
+
+| File                | Contents                                                                          |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `.env.local`        | API URL, model, key, and optional test credentials                                |
+| `config.local.json` | Test page URL, optional workbook path, account, and authentication state settings |
+
+### 2. Configure the API and test page
+
+The skill defaults to API mode and the `laya-decision` model. Override the model if your service requires another compatible model. Fill the skill's `.env.local`:
+
+```dotenv
+LAYA_API_BASE=https://your-gateway.example/v1
+LAYA_API_MODEL=laya-decision
+LAYA_API_KEY=your-api-key
+```
+
+The API must support this project's candidate-decision JSON protocol; see [setup and API configuration](skills/laya-pilot/references/setup.md).
+
+Set the target page in `config.local.json` in the same directory. For existing cases, you can also set `excel` to the workbook's absolute path:
+
+```json
+{
+    "url": "https://your-test-app.example/module"
+}
+```
+
+Check configuration and identify the installed version:
+
+```bash
+node scripts/setup.mjs --check
+node scripts/run.mjs --version
+```
+
+These files belong to the installed skill directory. Startup output shows configuration sources, the API model, and authentication file state; keys are reported only as present or absent. Local inference requires an explicit `--provider local`; see [setup](skills/laya-pilot/references/setup.md).
+
+### 3. Tell the AI what to do
+
+In a tool supporting `$skill-name`, requests can look like this:
+
+```text
+Use $laya-pilot to execute every case in /absolute/path/cases.xlsx.
+Inspect parsing first, then run headlessly against my configured test URL and provide reports and failure evidence.
+
+Use $laya-pilot to generate read-only cases for https://your-test-app.example/module.
+Remember the authenticated session after login so it can be reused next time.
+
+Use $laya-pilot to analyze /absolute/path/run/results.json and explain failed steps and causes.
+```
+
+Existing and generated workbooks both use `--excel`; no separate replay mode is needed. Cases are generated only on request, and an existing workbook is not automatically used as a generation template.
+
+Complete the first login manually, or configure `TEST_USER` and `TEST_PASSWORD` in `.env.local` for automatic login. When asked to remember login, the skill configures an `.auth` file and an authenticated-page marker, then validates and reuses the session on later runs. Expired sessions require login again. Keep passwords and keys out of JSON, command lines, and chat examples.
+
+## Option 2: Run repository code with run.sh
+
+Use this option for manual operation or custom development. Run these commands from the **repository root**, with Python 3.10+ available as `python3`:
+
+```bash
+git clone https://github.com/anthonyli/laya-pilot.git
 cd laya-pilot
-npm install
+npm ci
 npx playwright install chromium
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -r requirements-local.txt
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env.local
 ```
 
-On Windows, pass `.venv\Scripts\python.exe` with `--python`. For API-only use, install `requirements.txt` instead of `requirements-local.txt`. Consult the [official model card](https://huggingface.co/convaiinnovations/laya-multilingual) and [official Python project](https://github.com/NandhaKishorM/laya) for current Laya installation guidance.
-
-## Try the demo
-
-Start the demo in one terminal and run cases in another. Customer data lives in browser localStorage, and some DOM IDs change on every visit.
+Fill the API settings shown above in the repository root's `.env.local`. The repository CLI retains its local-model default; these examples explicitly select `--provider api`:
 
 ```bash
-npm run demo
-./run.sh --mode generate --url http://127.0.0.1:8765/customers \
-  --case-file generated-cases/customers.xlsx
-./run.sh --mode execute --case-file generated-cases/customers.xlsx \
-  --url http://127.0.0.1:8765/customers
+# Inspect an existing workbook without visiting the application
+bash run.sh --provider api --excel /absolute/path/cases.xlsx --inspect
+
+# Execute existing or generated cases
+bash run.sh --provider api --excel /absolute/path/cases.xlsx \
+  --url https://your-test-app.example/module --headless
+
+# Generate read-only cases from a page
+bash run.sh --provider api --mode generate \
+  --url https://your-test-app.example/module --read-only
 ```
 
-The browser is visible by default; add `--headless` when ready. To try an existing workbook, use `./run.sh --excel examples/demo-cases.xlsx --url http://127.0.0.1:8765/customers`. Generation performs real create, edit and delete operations, so use a dedicated test environment.
+Add `--allow-write` only after establishing the test environment and authorization for write operations. See the [workflow guide](skills/laya-pilot/references/workflows.md) for CRUD generation scopes. `run.sh` requires Bash on macOS/Linux; Windows can use `node runner.mjs`. Local model setup and further options are in the [repository runtime guide](docs/local-runtime.md). Use `bash run.sh --help` for command help.
 
-## Configure your system
+## Outputs and coverage
 
-Copy [`config.example.json`](config.example.json) to `config.local.json` and set your test URL and runtime options. Copy [`.env.example`](.env.example) to `.env.local` for local passwords and API keys. Both local files are ignored by Git. The launcher reads `.env.local` without executing shell code. CLI arguments override shell variables, which override `.env.local`, which overrides the JSON file. Passwords and API keys are accepted **only through environment variables, `.env.local`, or a hidden terminal prompt**, never through the JSON config.
+- Generated workbooks go to `generated-cases/`; reports and evidence go to `runs/`. Skill runs use `runs/laya-pilot/<run>/`.
+- Reports include JSON, Markdown, and available browser evidence. Ordinary Excel execution also produces CSV; generation and structured execution produce a separate `执行结果.xlsx`. Input workbooks remain unchanged.
+- Generated case files contain only cases that were executed and passed page assertions. Reports retain all attempts and coverage gaps. Fixed-rule checks may make no model calls; reports show the actual API call count.
+
+The current implementation uses Playwright and the Laya decision protocol. Complex approvals, multi-account permissions, file imports, and Canvas need adapters. Read-only filter checks verify control visibility, not the correctness of query results or reset behavior.
+
+## Demo, upgrades, and development
+
+Run `npm run demo`, then test `http://127.0.0.1:8765/customers`. The demo page and existing cases are in [examples/](examples/).
+
+![Public demo](docs/demo.png)
+
+[Introduction video](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
+
+Maintainers can package, check, or explicitly upgrade a chosen installation from the repository root:
 
 ```bash
-./run.sh --mode generate --config config.local.json --manual-login
-./run.sh --mode execute --config config.local.json \
-  --case-file generated-cases/customers.xlsx
+npm run skill:package
+npm run skill:check
+npm run skill:package -- --install-to /absolute/path/installed-skill
 ```
 
-For automatic login, pass `--user` or `TEST_USER`; supply the password through `TEST_PASSWORD` (optionally in `.env.local`) or the hidden prompt. API mode requires `LAYA_API_BASE`, `LAYA_API_MODEL`, and `LAYA_API_KEY`:
+The upgrade command preserves `.env.local`, `config.local.json`, `.auth`, dependencies, and models. Deleting the old skill directory also deletes that local data, so a fresh installation requires configuration again. The distribution's `manifest.json` records its version and content digest; local configuration and authentication state are excluded.
 
-```bash
-export LAYA_API_BASE='https://your-gateway.example/v1'
-export LAYA_API_MODEL='your-decision-model'
-export LAYA_API_KEY='your-secret-key'
-./run.sh --mode generate --provider api --url 'https://your-test-app.example/module' --manual-login
-```
+For development, run `npm test` and `npm run format:check`. Python and browser test commands are in the [runtime guide](docs/local-runtime.md).
 
-Local mode defaults to `convaiinnovations/laya-multilingual`; set `LAYA_MODEL=/path/to/model` and `LAYA_PYTHON=/path/to/python` to override it. The browser defaults to Playwright's bundled Chromium; `--browser-channel chrome` uses a separately installed Chrome. `--browser-provider` currently accepts only `playwright` and rejects unsupported values. `--template-excel` can supply a matching 17-column workbook; otherwise the tool creates one without relying on a personal file.
-
-Run artifacts go to ignored `runs/` and generated workbooks to ignored `generated-cases/`. Reports and workbooks may contain test URLs, page text or test data; review them before sharing. Run `./run.sh --help` for CLI options.
-
-## Development and limitations
-
-Code uses four-space indentation, UTF-8, LF line endings, and a 100-column wrapping target. Prettier formats JS, JSON, HTML, and Markdown; Ruff formats Python. Formatter versions are pinned, and formatting does not apply lint fixes.
-
-Development requires Node.js and uv. After `npm install`, run:
-
-```bash
-npm run format        # Format the repository
-npm run format:check  # Check formatting before a commit or in CI
-```
-
-On its first run, `uv tool run` obtains the pinned Ruff version and caches it for later use. Local model dependencies are not required. Runtime output, local configuration, and dependency directories are excluded; npm manages `package-lock.json`.
-
-`.editorconfig` supplies basic editor conventions; it does not reformat existing files. For formatting on save, install the Prettier and Ruff editor extensions and enable formatting on save for the corresponding languages.
-
-```bash
-npm test
-python3 -m unittest discover -s tests -p 'test_*.py'
-LAYA_TEST_PYTHON=/path/to/python-with-openpyxl npm run test:browser
-```
-
-Control discovery uses DOM, labels, ARIA roles and some common component classes. It re-observes dynamic DOM, but Canvas controls, closed Shadow DOM, unlabeled custom widgets, and cross-account workflows need adapters. See the [architecture guide](docs/architecture.md) for extension points and current boundaries.
-
-MIT License. Laya, Playwright and model weights have their own licenses.
+MIT License. Laya, Playwright, and model weights have their own licenses.

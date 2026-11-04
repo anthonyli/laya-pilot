@@ -11,8 +11,7 @@ node runner.mjs --mode generate --headless \
   --url http://127.0.0.1:8765/customers \
   --operations table,filters,create,search,view,edit,delete \
   --case-file generated-cases/customers.xlsx
-node runner.mjs --mode execute --headless \
-  --case-file generated-cases/customers.xlsx
+node runner.mjs --excel generated-cases/customers.xlsx --headless --allow-write
 ```
 
 `--operations` 也可在 JSON 配置中写成数组。省略时仍使用完整生成策略；`--read-only` 将范围限制为 `tabs,tab-switch,table,filters`。其中 `filters` 验证名称/账号筛选输入框，以及页面提供的搜索、重置控件可见，不代表筛选业务逻辑通过。只读是执行器允许的步骤范围，不是网络层阻止所有写请求。
@@ -62,7 +61,7 @@ node runner.mjs --mode generate --config config.local.json --headless \
 
 SIGINT/SIGTERM 会尽力保存部分结果与 trace 并关闭浏览器；SIGKILL、断电不能执行收尾，但之前写下的 checkpoint 可用于核对。无法保存 trace 时记录 `轨迹保存失败.json`。中断的输出目录可保留锁，改用新目录运行。
 
-**当前没有自动断点续跑。** checkpoint 用于核对已经发生的操作，不能证明服务端尚未提交。先核对 `pendingWrite` 与运行记录名，再决定清理或重跑；重新运行会使用新的记录名。`--excel` 通用执行器复用登录态和按需模型加载，但仍沿用其原有逐用例报告，不具备上述 workflow 中断账本。
+**当前没有自动断点续跑。** checkpoint 用于核对已经发生的操作，不能证明服务端尚未提交。先核对 `pendingWrite` 与运行记录名，再决定清理或重跑；重新运行会使用新的记录名。`--excel` 的普通 Excel 分支复用登录态和按需模型加载，但仍沿用其原有逐用例报告，不具备上述 workflow 中断账本。
 
 | 退出码        | 含义                                                    |
 | ------------- | ------------------------------------------------------- |

@@ -7,6 +7,7 @@ import {
     safeText,
     safeUrl,
     severeEvent,
+    registerSecret,
 } from '../lib/diagnostics.mjs';
 
 test('browser and interface errors are attributed only to the active case', async () => {
@@ -43,6 +44,23 @@ test('browser and interface errors are attributed only to the active case', asyn
     log.begin('search');
     assert.deepEqual(await log.end(), []);
     assert.equal(diagnoseFailure('列表没有记录', first).category, '接口 HTTP 5xx');
+});
+
+test('Playwright password HTML, JSON values and known secrets are redacted before truncation', () => {
+    for (const tag of [
+        '<input id="password" type="password" value="fake secret with spaces"/>',
+        "<input value='fake secret with spaces' type='password'>",
+        '<input name=password value=fake-secret>',
+    ]) {
+        assert.ok(!safeText(tag, 2000).includes('fake'));
+        assert.ok(safeText(tag, 2000).includes('[REDACTED]'));
+    }
+    assert.ok(!safeText('{"password":"fake secret with spaces"}').includes('fake'));
+    const secret = 'known credential & "quoted"';
+    registerSecret(secret);
+    for (const text of [secret, JSON.stringify(secret), encodeURIComponent(secret)])
+        assert.ok(!safeText('error: ' + text, 20).includes('known'));
+    assert.match(safeText('ordinary field=value'), /field=value/);
 });
 
 test('network and browser failures take priority; secrets are not logged', () => {

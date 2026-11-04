@@ -3,7 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Laya, beginModelWarmup, waitModelWarmup } from './lib/model.mjs';
 import { resultExitCode } from './lib/run-state.mjs';
-import { ensureAuthentication, saveAuthState } from './lib/auth-state.mjs';
+import {
+    ensureAuthentication,
+    saveAuthState,
+    captureFailureScreenshot,
+} from './lib/auth-state.mjs';
+import { registerSecret, safeText, safeUrl } from './lib/diagnostics.mjs';
 import { openBrowser } from './lib/browser-provider.mjs';
 import {
     loadLocalEnvironment,
@@ -36,7 +41,7 @@ const config = {
     provider: option('--provider', 'LAYA_PROVIDER', 'provider', 'local'),
     lazyModel: configuredFlag(args, '--lazy-model', null, fileConfig.lazyModel),
     apiBase: option('--api-base', 'LAYA_API_BASE', 'apiBase', ''),
-    apiModel: option('--api-model', 'LAYA_API_MODEL', 'apiModel', ''),
+    apiModel: option('--api-model', 'LAYA_API_MODEL', 'apiModel', 'laya-decision'),
     apiTimeout: Number(option('--api-timeout', 'LAYA_API_TIMEOUT', 'apiTimeout', 30000)),
     browserProvider: option(
         '--browser-provider',
@@ -76,7 +81,7 @@ const config = {
     out: path.resolve(option('--out', 'TEST_OUTPUT', 'out', path.join(ROOT, 'runs', runId))),
 };
 async function secret(label = '登录密码', envName = 'TEST_PASSWORD') {
-    if (process.env[envName]) return process.env[envName];
+    if (process.env[envName]) return registerSecret(process.env[envName]);
     if (!process.stdin.isTTY) throw Error('需要交互终端输入' + label + '，或设置' + envName);
     process.stdout.write(label + '（隐藏输入）：');
     process.stdin.setRawMode(true);
@@ -98,7 +103,7 @@ async function secret(label = '登录密码', envName = 'TEST_PASSWORD') {
                 }
                 if (c === '\r' || c === '\n') {
                     done();
-                    resolve(value);
+                    resolve(registerSecret(value));
                     return;
                 }
                 if (c === '\u007f') value = value.slice(0, -1);
@@ -121,6 +126,7 @@ async function report(results, laya, source, warnings) {
     const summary = {
         source,
         selection: config.selection,
+        workbookFormat: 'natural-language',
         import_warnings: warnings,
         mode: config.headless ? 'headless' : 'headed',
         provider: config.provider,
@@ -192,10 +198,13 @@ let laya, browser, activePage;
 async function main() {
     if (flag('--help')) {
         console.log(
-            'LayaPilot\n生成：./run.sh --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n回放：./run.sh --mode execute --case-file 用例.xlsx [--url 页面地址]\n原有Excel：./run.sh --excel 用例.xlsx --url 页面地址 [--cases 001,002]\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。',
+            'LayaPilot · 用例回归\n执行：./run.sh --excel 用例.xlsx --url 页面地址 --headless；自动识别普通用例或结构化计划\n检查：./run.sh --excel 用例.xlsx --inspect\n生成：./run.sh --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n旧命令兼容：./run.sh --mode execute --case-file 用例.xlsx [--url 页面地址]\n--allow-write：允许已授权的写操作；--cases：仅普通Excel编号筛选。\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。',
         );
         console.log(
             '--auth-state 文件：保存/复用登录态；--auth-reset：重新登录；--auth-check CSS：登录成功标记；--auth-session-storage：保存当前站点 sessionStorage',
+        );
+        console.log(
+            '--excel 自动识别工作簿并默认执行全部用例，不按历史结果或类型筛选；普通Excel可用--cases指定编号。',
         );
         console.log(
             '--operations tabs,tab-switch,table,filters,form-validation,form-invalid,create,search,view,edit,delete,discover；discover：模板完成后由模型选择补充测试；--read-only：只读检查；--data JSON文件：明确覆盖字段值',
@@ -208,7 +217,7 @@ async function main() {
     if (!config.excel && !arg('--mode', '')) throw Error('请通过--excel指定用例文件');
     if (!['local', 'api'].includes(config.provider))
         throw Error('--provider仅支持local或api，默认local');
-    if (config.provider === 'api' && (!config.apiBase || !config.apiModel))
+    if (config.provider === 'api' && !config.dryRun && (!config.apiBase || !config.apiModel))
         throw Error('API模式需配置 LAYA_API_BASE 和 LAYA_API_MODEL');
     if (config.browserProvider !== 'playwright')
         throw Error('当前只实现 playwright 浏览器驱动；browser-use 等适配器尚未实现');
@@ -231,7 +240,6 @@ async function main() {
         throw Error('--auth-state 需要 --auth-check 指定登录成功后的唯一页面标记');
     if ((config.authReset || config.authSessionStorage) && !config.authState)
         throw Error('--auth-reset / --auth-session-storage 需要 --auth-state');
-    if (!arg('--mode', '') && config.operations) throw Error('--operations 仅用于生成和回放');
     if (arg('--labels', '')) {
         config.labels = JSON.parse(await fs.readFile(arg('--labels', ''), 'utf8'));
         if (
@@ -247,20 +255,38 @@ async function main() {
         if (!d || typeof d !== 'object' || Array.isArray(d)) throw Error('--data必须是JSON对象');
         config.data = d;
     }
-    const workflowMode = arg('--mode', '');
+    let workflowMode = arg('--mode', '');
+    if (!workflowMode && config.excel) {
+        const { workbookCommand } = await import('./lib/workflow.mjs');
+        const detected = await workbookCommand(config, 'detect', {
+            path: path.resolve(config.excel),
+        });
+        if (detected.format === 'structured') {
+            workflowMode = 'execute';
+            config.unifiedExecution = true;
+        }
+    }
     if (workflowMode) {
-        config.caseFile = option('--case-file', 'TEST_CASE_FILE', 'caseFile', '');
+        config.caseFile = config.unifiedExecution
+            ? config.excel
+            : option('--case-file', 'TEST_CASE_FILE', 'caseFile', '');
         config.templateExcel = option(
             '--template-excel',
             'TEST_TEMPLATE_EXCEL',
             'templateExcel',
-            config.excel || '',
+            '',
         );
-        const { runWorkflow } = await import('./lib/workflow.mjs');
+        const { runWorkflow, inspectReplay } = await import('./lib/workflow.mjs');
+        if (config.dryRun) {
+            if (workflowMode !== 'execute') throw Error('--inspect 只用于检查已有用例文件');
+            await inspectReplay(config);
+            return;
+        }
         const summary = await runWorkflow(config, workflowMode, secret, ROOT);
         process.exitCode = summary.exitCode;
         return summary;
     }
+    if (config.operations) throw Error('--operations 只适用于生成或带结构化计划的工作簿');
     await fs.mkdir(path.join(config.out, 'evidence'), { recursive: true });
     let apiKey =
         config.provider === 'api' && !config.dryRun
@@ -282,36 +308,23 @@ async function main() {
     apiKey = null;
     const input = await laya.request({ action: 'read_excel', path: path.resolve(config.excel) });
     if (!input.cases.length) throw Error('Excel未读取到用例：' + input.warnings.join('；'));
-    const onlyPass = !flag('--all-cases');
-    const eligible = input.cases.filter(
-        (c) =>
-            !onlyPass ||
-            String(c.source_result || '')
-                .trim()
-                .toLowerCase() === 'pass',
-    );
-    const selected = eligible.filter(
+    const selected = input.cases.filter(
         (c) =>
             !config.cases.length ||
             config.cases.some((x) => x === c.id || x.padStart(3, '0') === c.id || x === c.key),
     );
     config.selection = {
-        only_source_pass: onlyPass,
+        only_source_pass: false,
         total: input.cases.length,
-        eligible: eligible.length,
+        eligible: input.cases.length,
         selected: selected.length,
-        excluded: input.cases
-            .filter((c) => !eligible.includes(c))
-            .map((c) => ({ id: c.id, sheet: c.sheet, source_result: c.source_result })),
+        excluded: [],
     };
     await fs.writeFile(
         path.join(config.out, 'selection.json'),
         JSON.stringify(config.selection, null, 2),
     );
-    if (!selected.length)
-        throw Error(
-            '没有匹配的pass用例或指定编号；其他工作簿需要执行非pass用例时显式使用--all-cases',
-        );
+    if (!selected.length) throw Error('没有匹配的用例编号，请检查 --cases 指定的范围');
     const inspection = selected.map((c) => ({
         id: c.id,
         key: c.key,
@@ -322,13 +335,13 @@ async function main() {
     }));
     await fs.writeFile(
         path.join(config.out, 'excel-inspection.json'),
-        JSON.stringify({ warnings: input.warnings, cases: inspection }, null, 2),
+        JSON.stringify(
+            { workbookFormat: 'natural-language', warnings: input.warnings, cases: inspection },
+            null,
+            2,
+        ),
     );
     console.log(`读取${input.cases.length}条，本轮${selected.length}条。`);
-    if (onlyPass)
-        console.log(
-            `仅执行原Excel“实际执行结果”为pass的用例；排除${input.cases.length - eligible.length}条。`,
-        );
 
     if (config.dryRun) {
         console.log('Excel检查结果：' + path.join(config.out, 'excel-inspection.json'));
@@ -430,22 +443,24 @@ async function main() {
     } else await browser.close();
 }
 main().catch(async (e) => {
-    console.error('停止：' + e.message);
+    const errorMessage = safeText(e.message, 1200);
+    console.error('停止：' + errorMessage);
     await fs.mkdir(config.out, { recursive: true }).catch(() => {});
     await fs
         .writeFile(
             path.join(config.out, '启动失败.json'),
             JSON.stringify(
-                { category: e.category || '启动失败', message: e.message, url: activePage?.url() },
+                {
+                    category: e.category || '启动失败',
+                    message: errorMessage,
+                    url: activePage ? safeUrl(activePage.url()) : null,
+                },
                 null,
                 2,
             ),
         )
         .catch(() => {});
-    if (activePage)
-        await activePage
-            .screenshot({ path: path.join(config.out, '启动失败.png') })
-            .catch(() => {});
+    await captureFailureScreenshot(activePage, path.join(config.out, '启动失败.png'));
     laya?.close();
     await browser?.close().catch(() => {});
     process.exitCode = e.exitCode || 1;
