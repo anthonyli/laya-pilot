@@ -19,3 +19,8 @@ config.json
 latest-run.json
 storage-state*.json
 .auth/
+
+# Multica runtime-injected files (not repository content)
+/AGENTS.md
+/.multica/daemon_task_context.json
+/.multica/project/resources.json
