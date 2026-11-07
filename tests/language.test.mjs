@@ -31,7 +31,11 @@ test('Unknown/missing data must never turn into an action or a pass', () => {
     assert.throws(() => parseData('任意写点数据'));
 });
 test('Negative, selected and count assertions are distinct', () => {
-    assert.deepEqual(expectation('页面不显示“错误”'), { kind: 'absent', target: '错误' });
+    assert.deepEqual(expectation('页面不显示“错误”'), {
+        kind: 'absent',
+        target: '错误',
+        scope: '页面',
+    });
     assert.deepEqual(expectation('“客户名称”为空'), { kind: 'empty', target: '客户名称' });
     assert.deepEqual(expectation('默认选中「运行区」Tab'), { kind: 'selected', target: '运行区' });
     assert.deepEqual(expectation('列表记录数为1'), { kind: 'rowcount', value: 1 });
