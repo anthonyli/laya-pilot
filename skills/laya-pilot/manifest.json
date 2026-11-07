@@ -1,7 +1,7 @@
 {
     "schemaVersion": 1,
     "version": "0.1.0",
-    "contentHash": "952348c2e1a946e488a6c760edc1c991b6b6a604d597d63d524f3bfe7dcd54e5",
+    "contentHash": "84173589d5eb01e9f011e9039e5495f30f46bb0e1004cd0ca789b5545dcb03ff",
     "files": {
         "LICENSE": "5f28e43cb8fce117b5d717739e791792ab76b0670af5a209b88472af8fd3ae7d",
         "SKILL.md": "a0beaab6249176812557bc6e682f879b170cba552e4e88db2bb8651a0731ed4a",
@@ -20,7 +20,7 @@
         "runtime/lib/dom.mjs": "3a167f1b4aec92e511f4b56e16e76dac98279b498e86f735192ace61ba5a46f7",
         "runtime/lib/engine.mjs": "abebd29d4ab5063a93b5d67e5e57851e90d827849bc948b377377102a6b311b1",
         "runtime/lib/form.mjs": "a7185ef21214555fba22eb481301924eeae3a4aad371b60f5793adf777543a27",
-        "runtime/lib/language.mjs": "60a0e60ce5897f188e3d2f468177455c98fc168bb9010c2a395f759800660ad2",
+        "runtime/lib/language.mjs": "d5aa6cafa3db4aca61ce0b5fef70b2c1c1d9202f02558a38556b25beccbbe4c8",
         "runtime/lib/model.mjs": "257ec5a51813c0ed681817a8b6f142a36bc54004deeb9286640b318790026f0e",
         "runtime/lib/pending-writes.mjs": "b5e9e211af48c06e6d886ef478b396c695f80c8858f915ea82b9858c4829c043",
         "runtime/lib/planner.mjs": "727ee50568a2116ba306eb689d8d86a6ce7e9223fe3a690f3c21e3493127872d",

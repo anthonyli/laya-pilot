@@ -11,10 +11,20 @@ export const norm = (s) =>
         .replace(/[\s“”「」『』"'：:，,。.!！?？_\-]/g, '');
 export const quoted = (s) => [...s.matchAll(/[“「『"]([^”」』"]*)[”」』"]/g)].map((m) => m[1]);
 export function lines(s) {
-    return String(s || '')
-        .split(/\r?\n|[；;](?=(?:[^“”]*“[^“”]*”)*[^“”]*$)/)
-        .map((x) => x.replace(/^\s*(?:\d+[、.．)）:]|[-•])\s*/, '').trim())
-        .filter(Boolean);
+    const parts = [];
+    for (const line of String(s || '').split(/\r?\n/)) {
+        // Recognize the same quoted spans as quoted(); only split outside them.
+        let start = 0;
+        const tokens = /[“「『"]([^”」』"]*)[”」』"]|[；;]/g;
+        for (const match of line.matchAll(tokens)) {
+            if (match[0] === ';' || match[0] === '；') {
+                parts.push(line.slice(start, match.index));
+                start = match.index + 1;
+            }
+        }
+        parts.push(line.slice(start));
+    }
+    return parts.map((x) => x.replace(/^\s*(?:\d+[、.．)）:]|[-•])\s*/, '').trim()).filter(Boolean);
 }
 export function variables(text, data) {
     return String(text || '').replace(/\$\{([^}]+)\}/g, (_, key) => {
