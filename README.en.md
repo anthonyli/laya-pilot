@@ -129,7 +129,7 @@ npm run skill:check
 npm run skill:package -- --install-to /absolute/path/installed-skill
 ```
 
-The upgrade command preserves `.env.local`, `config.local.json`, `.auth`, dependencies, and models. Deleting the old skill directory also deletes that local data, so a fresh installation requires configuration again. The distribution's `manifest.json` records its version and content digest; local configuration and authentication state are excluded.
+The upgrade command preserves `.env.local`, `config.local.json`, `.auth`, dependencies, and models. Deleting the old skill directory also deletes that local data, so a fresh installation requires configuration again. The distribution's `manifest.json` records its version and content digest; local configuration and authentication state are excluded. The packaging script generates that file from the current sources, it is not tracked by git, and installed copies receive it from the ZIP.
 
 For development, run `npm test` and `npm run format:check`. Python and browser test commands are in the [runtime guide](docs/local-runtime.md).
 
