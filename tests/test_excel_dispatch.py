@@ -1,6 +1,7 @@
 """Verify workbook dispatch and integrity checks through the public Excel CLI."""
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -64,6 +65,8 @@ class ExcelDispatchTests(unittest.TestCase):
                 'BROWSER_HEADLESS': 'false',
             }
         )
+        if provider == 'api' and not inspect:
+            env.update({'LAYA_API_BASE': 'http://127.0.0.1:9', 'LAYA_API_MODEL': 'fixture'})
         result = subprocess.run(
             [
                 'node',
@@ -122,6 +125,35 @@ class ExcelDispatchTests(unittest.TestCase):
         execution = self.run_cli(inspect=False, expected=1)
         self.assertIn('与隐藏回放步骤不一致', execution.stderr)
         self.assertFalse((self.output / 'trace.zip').exists())
+
+    def test_appended_case_is_rejected_before_inspection_or_execution(self):
+        book = load_workbook(self.workbook)
+        sheet = book['生成用例']
+        for col in range(1, 18):
+            sheet.cell(3, col).value = sheet.cell(2, col).value
+        sheet.cell(3, 1).value = '002'
+        book.save(self.workbook)
+        book.close()
+        before = hashlib.sha256(self.workbook.read_bytes()).hexdigest()
+        for inspect in (True, False):
+            result = self.run_cli(inspect=inspect, expected=1, provider='api')
+            self.assertIn('工作表「生成用例」第3行', result.stderr)
+            self.assertFalse((self.output / 'trace.zip').exists())
+        self.assertEqual(hashlib.sha256(self.workbook.read_bytes()).hexdigest(), before)
+
+    def test_formatted_empty_rows_are_ignored_but_extra_sheet_is_not(self):
+        book = load_workbook(self.workbook)
+        book['生成用例'].cell(20, 1).number_format = '@'
+        book[workbooks.META].cell(20, 1).number_format = '@'
+        book.save(self.workbook)
+        book.close()
+        self.run_cli()
+        book = load_workbook(self.workbook)
+        book.create_sheet('额外用例')['A1'] = '测试编号'
+        book.save(self.workbook)
+        book.close()
+        result = self.run_cli(expected=1)
+        self.assertIn('工作表「额外用例」第1行', result.stderr)
 
     def test_removed_plan_is_rejected_when_the_generated_marker_remains(self):
         book = load_workbook(self.workbook)

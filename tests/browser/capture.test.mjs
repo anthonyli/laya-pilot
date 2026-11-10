@@ -48,7 +48,10 @@ test('capture succeeds or records failure without using a stale screenshot', asy
         assert.equal(success.status, '失败');
         assert.ok((await fs.stat(path.join(out, success.screenshot))).size > 0);
         const old = await fs.readFile(path.join(out, success.screenshot));
-        page.screenshot = async () => {
+        let attemptedPath;
+        page.screenshot = async ({ path: screenshotPath }) => {
+            attemptedPath = screenshotPath;
+            await fs.writeFile(attemptedPath, old);
             throw Error('injected failure');
         };
         const failure = await engine.runCase(c);
@@ -56,8 +59,10 @@ test('capture succeeds or records failure without using a stale screenshot', asy
         assert.equal(failure.screenshot, undefined);
         assert.match(failure.screenshot_error, /injected failure/);
         assert.deepEqual(await fs.readFile(path.join(out, success.screenshot)), old);
+        assert.notEqual(attemptedPath, path.join(out, success.screenshot));
+        assert.deepEqual(await fs.readFile(attemptedPath), old);
         const controls = JSON.parse(
-            await fs.readFile(path.join(out, 'evidence/capture-2-controls.json')),
+            await fs.readFile(attemptedPath.replace(/\.png$/, '-controls.json')),
         );
         assert.ok(controls.controls.some((c) => c.name === 'CONTROL'));
     } finally {

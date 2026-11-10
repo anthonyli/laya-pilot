@@ -31,9 +31,38 @@ test('Unknown/missing data must never turn into an action or a pass', () => {
     assert.throws(() => parseData('任意写点数据'));
 });
 test('Negative, selected and count assertions are distinct', () => {
-    assert.deepEqual(expectation('页面不显示“错误”'), { kind: 'absent', target: '错误' });
+    assert.deepEqual(expectation('页面不显示“错误”'), {
+        kind: 'absent',
+        target: '错误',
+        scope: '页面',
+    });
     assert.deepEqual(expectation('“客户名称”为空'), { kind: 'empty', target: '客户名称' });
     assert.deepEqual(expectation('默认选中「运行区」Tab'), { kind: 'selected', target: '运行区' });
     assert.deepEqual(expectation('列表记录数为1'), { kind: 'rowcount', value: 1 });
     assert.equal(lines('1、点击“新增”\n2、查看页面').length, 2);
+});
+
+test('quoted semicolons stay in steps and expectations while outside separators split', () => {
+    for (const [open, close] of [
+        ['「', '」'],
+        ['“', '”'],
+        ['"', '"'],
+    ]) {
+        const step = `点击${open}a;b；c${close}`;
+        const expected = `页面显示${open}a;b；c${close}`;
+        assert.deepEqual(
+            lines(`${step}；点击「下一步」;${step}`)
+                .map(describe)
+                .map((x) => x.target),
+            ['a;b；c', '下一步', 'a;b；c'],
+        );
+        assert.deepEqual(
+            lines(`${expected};${expected}`)
+                .map(expectation)
+                .map((x) => x.target),
+            ['a;b；c', 'a;b；c'],
+        );
+    }
+    assert.equal(describe(lines('Fill "name" with "a;b；c"')[0]).value, 'a;b；c');
+    assert.equal(expectation(lines('page shows "a;b"')[0]).target, 'a;b');
 });

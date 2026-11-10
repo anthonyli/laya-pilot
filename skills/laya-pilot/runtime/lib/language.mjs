@@ -11,10 +11,20 @@ export const norm = (s) =>
         .replace(/[\s“”「」『』"'：:，,。.!！?？_\-]/g, '');
 export const quoted = (s) => [...s.matchAll(/[“「『"]([^”」』"]*)[”」』"]/g)].map((m) => m[1]);
 export function lines(s) {
-    return String(s || '')
-        .split(/\r?\n|[；;](?=(?:[^“”]*“[^“”]*”)*[^“”]*$)/)
-        .map((x) => x.replace(/^\s*(?:\d+[、.．)）:]|[-•])\s*/, '').trim())
-        .filter(Boolean);
+    const parts = [];
+    for (const line of String(s || '').split(/\r?\n/)) {
+        // Recognize the same quoted spans as quoted(); only split outside them.
+        let start = 0;
+        const tokens = /[“「『"]([^”」』"]*)[”」』"]|[；;]/g;
+        for (const match of line.matchAll(tokens)) {
+            if (match[0] === ';' || match[0] === '；') {
+                parts.push(line.slice(start, match.index));
+                start = match.index + 1;
+            }
+        }
+        parts.push(line.slice(start));
+    }
+    return parts.map((x) => x.replace(/^\s*(?:\d+[、.．)）:]|[-•])\s*/, '').trim()).filter(Boolean);
 }
 export function variables(text, data) {
     return String(text || '').replace(/\$\{([^}]+)\}/g, (_, key) => {
@@ -196,7 +206,7 @@ export function expectation(text) {
         return { kind: 'disabled', target: m[1] };
     if ((m = text.match(/^悬浮提示[「“"](.+)[」”"]$/))) return { kind: 'tooltip', target: m[1] };
     if ((m = text.match(/^(?:页面|弹窗)?(?:展示|显示)[「“"](.+)[」”"]按钮$/)))
-        return { kind: 'controlVisible', target: m[1] };
+        return { kind: 'controlVisible', target: m[1], role: 'button' };
     if ((m = text.match(/^(?:右侧)?弹出(.+?)(?:弹窗|Modal|Drawer|抽屉)$/i)))
         return { kind: 'dialog', target: m[1] };
     if ((m = text.match(/^名称列固定在左侧，操作列固定在右侧$/)))
@@ -225,16 +235,16 @@ export function expectation(text) {
         return { kind: 'columnValues', column: '权限', values: [m[1]] };
     if (
         (m = text.match(
-            /^(?:页面|列表|弹窗)?(?:不显示|不展示|不存在|不包含)\s*[“「"](.+)[”」"](?:文本|文案)?$/,
+            /^(页面|列表|弹窗)?(?:不显示|不展示|不存在|不包含)\s*[“「"](.+)[”」"](?:文本|文案)?$/,
         ))
     )
-        return { kind: 'absent', target: m[1] };
+        return { kind: 'absent', target: m[2], ...(m[1] ? { scope: m[1] } : {}) };
     if (
         (m = text.match(
-            /^(?:页面|列表|弹窗)?(?:显示|展示|包含|出现)\s*[“「"](.+)[”」"](?:文本|文案)?$/,
+            /^(页面|列表|弹窗)?(?:显示|展示|包含|出现)\s*[“「"](.+)[”」"](?:文本|文案)?$/,
         ))
     )
-        return { kind: 'visible', target: m[1] };
+        return { kind: 'visible', target: m[2], ...(m[1] ? { scope: m[1] } : {}) };
     if ((m = text.match(/^(?:page\s+)?(?:shows|contains)\s+"(.+)"$/i)))
         return { kind: 'visible', target: m[1] };
     if ((m = text.match(/^"(.+)"\s+is\s+(empty|disabled|enabled|checked|selected)$/i)))

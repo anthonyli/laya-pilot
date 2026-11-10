@@ -186,9 +186,9 @@ async function report(results, laya, source, warnings) {
         .map(([k, v]) => k + ' ' + v)
         .join(
             '，',
-        )}。通过要求步骤完整执行且全部预期有明确断言；跳过不计通过。\n\n|编号|用例|结果|原因|\n|---|---|---|---|\n`;
+        )}。通过要求步骤完整执行且全部预期有明确断言；跳过不计通过。\n\n|编号|用例|结果|原因|截图|\n|---|---|---|---|---|\n`;
     for (const r of results)
-        md += `|${clean(r.id)}|${clean(r.title)}|${r.status}|${clean(r.reason)}${r.screenshot_error ? '；' + clean(r.screenshot_error) : ''}|\n`;
+        md += `|${clean(r.id)}|${clean(r.title)}|${r.status}|${clean(r.reason)}${r.screenshot_error ? '；' + clean(r.screenshot_error) : ''}|${r.screenshot ? `[截图](${r.screenshot})` : ''}|\n`;
     await fs.writeFile(path.join(config.out, '报告.md'), md);
     await fs.writeFile(
         path.join(ROOT, 'latest-run.json'),
