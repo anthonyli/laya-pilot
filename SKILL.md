@@ -1,6 +1,6 @@
 ---
 name: laya-pilot
-description: Run browser regression tests from user-provided Excel test cases for enterprise admin applications, preserving their steps and expected results and producing reports and failure evidence. Use for executing existing workbooks and analyzing regression runs. Case generation is optional and requires a user request. API access is the default; local model downloads require an explicit user request.
+description: Run browser regression tests from user-provided Excel test cases for enterprise admin applications, preserving their steps and expected results and producing reports and failure evidence. Use for executing existing workbooks, providing a case template with examples, and analyzing regression runs. Case generation is optional and requires a user request. API access is the default; local model downloads require an explicit user request.
 ---
 
 # LayaPilot
@@ -28,9 +28,15 @@ description: Run browser regression tests from user-provided Excel test cases fo
 
 用户已在本次请求或当前对话中明确“生成”或“执行”时，沿用已确认的意图，不重复询问；后续补充地址也不重新选择模式。
 
+## 用户没有用例模板时
+
+用户索要模板或表示没有模板时，直接提供内置的 [Excel 用例模板](assets/test-cases-template.xlsx)：复制到用户工作目录的新文件，给出文件链接及 [填写说明](references/case-template.md)，不覆盖用户已有文件或修改 skill 内的模板。模板提供用例编号、名称、前置条件、测试数据、步骤和预期结果六列，预填三条编号为 `DEMO-001` 至 `DEMO-003` 的示例用例，名称标注“【示例】”。说明这些用例对应源码 demo 的客户页面，用户应先修改或删除示例再用于自己的系统；执行器会正常读取这些行，不会自动跳过。步骤和预期结果必填，填写后再通过 `--excel ... --inspect` 检查。
+
+没有用例与没有模板需要区分：用户希望 AI 从页面生成用例时，直接使用生成流程，无须先填模板；已有 Excel 也无需转换成本模板。此模板用于手工编写后执行的普通 Excel，不作为生成模式的 `--template-excel` 参数。
+
 ## 主流程：已有用例回归
 
-1. 从当前任务获取 Excel 和目标地址，通过 `--excel`、`--url` 传入；登录方式可复用 `.env.local` 中的配置。用户要求回归却未提供用例时，先补齐用例文件，不自动改成从页面生成用例。
+1. 从当前任务获取 Excel 和目标地址，通过 `--excel`、`--url` 传入；登录方式可复用 `.env.local` 中的配置。用户要求回归却未提供用例时，先补齐用例文件；没有模板时提供内置模板，不自动改成从页面生成用例。
 2. 使用 `scripts/run.mjs --excel ... --inspect` 自动识别工作簿并检查解析、计划校验、用例数与导入警告。默认包含全部读取到的用例；未识别的工作表或步骤要明确报告，不能算作已覆盖。
 3. 执行这些现有用例；常用无头回归命令为 `scripts/run.mjs --excel ... --url ... --headless`。按原用例保留数据、步骤和预期；只有用户明确要求修订时才修改原用例。登录前检查已配置的 `authState` 和登录后唯一标记 `authCheck`，优先复用并验证已有登录态；失效后再登录。
 4. 读取本轮报告，按用例给出结果、失败步骤与证据路径。普通用例输出 JSON、CSV、Markdown；结构化用例输出独立结果 Excel、JSON、Markdown。浏览器证据按实际产物提供，原始工作簿保持不变。

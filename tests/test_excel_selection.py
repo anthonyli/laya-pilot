@@ -1,6 +1,7 @@
 """Exercise actual CLI import/selection without starting a browser or a model."""
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -9,7 +10,7 @@ import sys
 import tempfile
 import unittest
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,6 +104,55 @@ class ExcelSelectionTests(unittest.TestCase):
         selection, inspection = self.inspect('--all-cases')
         self.assertEqual(selection['selected'], 4)
         self.assertEqual(len(inspection['cases']), 4)
+
+    def test_bundled_template_examples_and_user_copy_are_read_without_changing_source(self):
+        template = ROOT / 'assets/test-cases-template.xlsx'
+        original = hashlib.sha256(template.read_bytes()).digest()
+        imported = subprocess.run(
+            [sys.executable, str(ROOT / 'scripts/worker.py')],
+            input=json.dumps({'id': 1, 'action': 'read_excel', 'path': str(template)}) + '\n',
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        imported_cases = json.loads(imported.stdout)
+        self.assertEqual(
+            [case['id'] for case in imported_cases['cases']],
+            ['DEMO-001', 'DEMO-002', 'DEMO-003'],
+        )
+        self.assertEqual(imported_cases['warnings'], [])
+        shutil.copyfile(template, self.workbook)
+        selection, inspection = self.inspect()
+        self.assertEqual(selection['selected'], 3)
+        self.assertEqual([len(case['steps']) for case in inspection['cases']], [1, 3, 4])
+        for case in inspection['cases']:
+            self.assertTrue(case['title'].startswith('【示例】'))
+            self.assertTrue(all(step['verb'] != 'unsupported' for step in case['steps']))
+            self.assertTrue(all(item['kind'] != 'unsupported' for item in case['expected']))
+        book = load_workbook(template)
+        self.assertEqual(book.sheetnames, ['测试用例'])
+        sheet = book.active
+        self.assertEqual(sheet.freeze_panes, 'A2')
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                cell.value = None
+        for column, value in enumerate(
+            ['001', '查询按钮可见', '已登录', '', '查看当前页面', '“查询”按钮可见'], 1
+        ):
+            sheet.cell(2, column, value)
+        book.save(self.workbook)
+        book.close()
+        selection, inspection = self.inspect()
+        self.assertEqual(selection['total'], 1)
+        self.assertEqual(selection['selected'], 1)
+        case = inspection['cases'][0]
+        self.assertEqual(case['id'], '001')
+        self.assertEqual(case['title'], '查询按钮可见')
+        self.assertEqual([step['text'] for step in case['steps']], ['查看当前页面'])
+        self.assertEqual(case['steps'][0]['verb'], 'observe')
+        self.assertEqual([item['text'] for item in case['expected']], ['“查询”按钮可见'])
+        self.assertEqual(hashlib.sha256(template.read_bytes()).digest(), original)
 
 
 if __name__ == '__main__':

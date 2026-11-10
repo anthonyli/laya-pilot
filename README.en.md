@@ -71,6 +71,8 @@ Complete the first login manually or use configured credentials. Ask the AI to r
 
 ## Run commands directly
 
+If you need a case template, download the [Excel workbook with examples](assets/test-cases-template.xlsx) and follow the [filling guide](references/case-template.md), or ask the AI for a copy. It includes three clearly labeled demo cases for button visibility, customer search, and resetting a filter. Replace or remove them before running against your own application; example rows are not automatically skipped. The template has Chinese headers for case ID, name, preconditions, data, steps, and expected results. Existing workbooks need no conversion, and generating cases from a page does not require filling in a template first.
+
 Use the same installation and configuration above. Run these commands from the skill root, or use absolute script paths when working elsewhere.
 
 ```bash
@@ -141,7 +143,7 @@ The demo page and sample workbook are in [examples/](examples/). Give the AI `ex
 SKILL.md       AI skill entry point
 scripts/       Setup, execution, demo, packaging, and runtime libraries
 references/    Setup and testing workflows
-assets/        Minimal configuration template
+assets/        Configuration and example Excel case templates
 examples/      Demo page and sample cases
 docs/          Architecture and technical notes
 tests/         Automated regression tests

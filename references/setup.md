@@ -147,6 +147,8 @@ node scripts/run.mjs --excel '/absolute/path/cases.xlsx' \
 
 ## 用例模板
 
+需要手工编写用例但没有模板时，复制 [内置 Excel 模板](../assets/test-cases-template.xlsx)，按 [填写说明](case-template.md)完成后通过 `--excel` 执行。模板随 skill 交付包提供，内含三条标注“【示例】”的 demo 用例；用于自己的系统前先修改或删除示例行。
+
 现有 Excel 回归直接读取用户用例，无须先生成或下载模板；至少要能识别步骤和预期结果表头。只有用户明确要求生成新用例时，生成器才使用内置 17 列结构；用户指定自定义生成模板时使用 `--template-excel /absolute/path/template.xlsx`。
 
 demo 页面、示例用例和启动脚本仅在 [源码仓库](https://github.com/anthonyli/laya-pilot#体验-demo) 中提供，不包含在 skill 交付包内。

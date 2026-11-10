@@ -102,6 +102,11 @@ class SkillUpgradeTests(unittest.TestCase):
         first = package_skill.distribution_files()
         second = package_skill.distribution_files()
         self.assertEqual(first['manifest.json'], second['manifest.json'])
+        self.assertEqual(
+            first['assets/test-cases-template.xlsx'],
+            (ROOT / 'assets/test-cases-template.xlsx').read_bytes(),
+        )
+        self.assertIn('references/case-template.md', first)
         self.assertNotIn('assets/config.example.json', first)
         self.assertFalse(
             any(

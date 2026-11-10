@@ -71,6 +71,8 @@ node scripts/setup.mjs --check
 
 ## 直接运行命令
 
+没有用例模板时，可下载 [含示例的 Excel 模板](assets/test-cases-template.xlsx)，内含按钮可见、客户搜索、重置筛选三条示例，按 [填写说明](references/case-template.md)修改或删除示例后执行；也可以直接让 AI 提供模板副本。已有 Excel 无需转换，想从页面生成用例时无需先填模板。
+
 安装与配置同上。以下命令在 skill 根目录执行；从其他目录调用时，使用脚本的绝对路径。
 
 ```bash
@@ -141,7 +143,7 @@ npm run demo
 SKILL.md       AI 使用入口
 scripts/       安装、执行、demo、打包脚本及运行库
 references/    安装配置与测试工作流
-assets/        精简配置模板
+assets/        配置模板与含示例的 Excel 用例模板
 examples/      demo 页面与示例用例
 docs/          架构与技术说明
 tests/         自动化回归测试
