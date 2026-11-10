@@ -21,5 +21,6 @@ storage-state*.json
 test-results/
 playwright-report/
 dist/laya-pilot-skill.zip
+skills/laya-pilot/manifest.json
 
 .auth/

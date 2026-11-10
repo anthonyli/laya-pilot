@@ -129,7 +129,7 @@ npm run skill:check
 npm run skill:package -- --install-to /absolute/path/installed-skill
 ```
 
-升级命令保留 `.env.local`、`config.local.json`、`.auth`、依赖和模型。直接删除旧 skill 目录会同时删除这些本机数据，重新安装后需要再次配置。分发包的 `manifest.json` 记录版本和内容摘要，不包含本机配置和登录态。
+升级命令保留 `.env.local`、`config.local.json`、`.auth`、依赖和模型。直接删除旧 skill 目录会同时删除这些本机数据，重新安装后需要再次配置。分发包的 `manifest.json` 记录版本和内容摘要，不包含本机配置和登录态；该文件由打包脚本按当前源码生成，不纳入版本控制，安装副本从 ZIP 中获得。
 
 开发验证使用 `npm test`、`npm run format:check`；Python 和浏览器测试命令见 [运行指南](docs/local-runtime.md)。
 
