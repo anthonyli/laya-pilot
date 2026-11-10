@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Engine } from '../lib/engine.mjs';
-import { waitForReady } from '../lib/readiness.mjs';
-import { describe, expectation } from '../lib/language.mjs';
+import { Engine } from '../scripts/lib/engine.mjs';
+import { waitForReady } from '../scripts/lib/readiness.mjs';
+import { describe, expectation } from '../scripts/lib/language.mjs';
 
 test('Repeated same-page navigation waits again but does not reload', async () => {
     let current = 'about:blank',

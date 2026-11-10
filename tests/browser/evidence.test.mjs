@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { chromium } from 'playwright';
-import { Engine } from '../../lib/engine.mjs';
+import { Engine } from '../../scripts/lib/engine.mjs';
 
 test('evidence keeps distinct cases and unsafe names inside the evidence directory', async () => {
     const out = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-evidence-'));

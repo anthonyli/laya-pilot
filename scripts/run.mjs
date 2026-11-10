@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { safeText } from '../runtime/lib/diagnostics.mjs';
-import { option, requireNode, runtimeRoot, resolveSkillSettings, skillVersion } from './common.mjs';
+import { safeText } from './lib/diagnostics.mjs';
+import { option, requireNode, skillRoot, resolveSkillSettings, skillVersion } from './common.mjs';
 
 async function main() {
     requireNode();
@@ -17,23 +17,22 @@ Setup: node scripts/setup.mjs [--python PATH] [--skip-browser]
 Check: node scripts/setup.mjs --check
 Regression: node scripts/run.mjs --excel FILE.xlsx --url URL --headless
 Inspect: node scripts/run.mjs --excel FILE.xlsx --inspect
-Configured regression: node scripts/run.mjs --headless (excel and url in config.local.json)
+Configuration: .env.local stores API access and optional login settings; pass the workbook and URL per task.
 Excel defaults to all imported cases, regardless of historical result or case type.
 Optional generation: node scripts/run.mjs --mode generate --url URL [--case-file FILE.xlsx]
 Excel auto-detects ordinary cases or generated structured plans; no extra execution mode is needed.
 Legacy compatibility: --mode execute --case-file FILE.xlsx [--url URL]
 Reports default to the current working directory under runs/laya-pilot/.
 API settings: LAYA_API_BASE, LAYA_API_MODEL, LAYA_API_KEY in the environment or skill .env.local.
-Configuration: skill config.local.json loads automatically; --config FILE overrides it.
+Configuration: the skill .env.local loads automatically; CLI options override it.
 --provider local explicitly opts into local inference; setup.mjs --local-model installs and downloads weights.
-Options: --config FILE, --python PATH, --headless, --manual-login, --out DIR,
+Options: --python PATH, --headless, --manual-login, --out DIR,
 --auth-state FILE --auth-check CSS, --read-only, --operations LIST,
 --data FILE, --template-excel FILE, --allow-write (authorized writes for either Excel format).
 See references/setup.md and references/workflows.md for details.`);
         return;
     }
-    const { configPath, fileConfig, settings, summary } = await resolveSkillSettings(args);
-    if (!args.includes('--config') && configPath) args.push('--config', configPath);
+    const { settings, summary } = await resolveSkillSettings(args);
     // A local model is an explicit per-run choice. Inherited environment/config cannot opt in.
     const provider = option(args, '--provider') || 'api';
     if (!['api', 'local'].includes(provider)) throw Error('--provider must be api or local');
@@ -51,13 +50,12 @@ See references/setup.md and references/workflows.md for details.`);
     }
     {
         const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid;
-        if (!args.includes('--out') && !process.env.TEST_OUTPUT && !fileConfig.out)
+        if (!args.includes('--out') && !process.env.TEST_OUTPUT)
             args.push('--out', path.join(process.cwd(), 'runs', 'laya-pilot', id));
         if (
             option(args, '--mode') === 'generate' &&
             !args.includes('--case-file') &&
-            !process.env.TEST_CASE_FILE &&
-            !fileConfig.caseFile
+            !process.env.TEST_CASE_FILE
         )
             args.push(
                 '--case-file',
@@ -65,10 +63,14 @@ See references/setup.md and references/workflows.md for details.`);
             );
     }
     console.log('CONFIG ' + JSON.stringify(summary));
-    const child = spawn(process.execPath, [path.join(runtimeRoot, 'runner.mjs'), ...args], {
-        stdio: 'inherit',
-        env: process.env,
-    });
+    const child = spawn(
+        process.execPath,
+        [path.join(skillRoot, 'scripts', 'runner.mjs'), ...args],
+        {
+            stdio: 'inherit',
+            env: process.env,
+        },
+    );
     const signals = ['SIGINT', 'SIGTERM'];
     const handlers = signals.map((signal) => {
         const handler = () => child.kill(signal);

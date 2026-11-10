@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApiDecision, decodeDecision, Laya } from '../lib/model.mjs';
+import { ApiDecision, decodeDecision, Laya } from '../scripts/lib/model.mjs';
 const criteria = { 搜索: '点击搜索', 停止: '不执行' };
 const envelope = (
     answer = { choice: '搜索', probabilities: { 搜索: 0.9, 停止: 0.1 }, confidence: 0.8 },

@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { RunJournal, resultExitCode, writePrivateJson } from '../lib/run-state.mjs';
-import { loadAuthState } from '../lib/auth-state.mjs';
-import { workflowPolicy, enforceReplayPolicy } from '../lib/workflow-policy.mjs';
-import { Laya, beginModelWarmup, waitModelWarmup } from '../lib/model.mjs';
+import { RunJournal, resultExitCode, writePrivateJson } from '../scripts/lib/run-state.mjs';
+import { loadAuthState } from '../scripts/lib/auth-state.mjs';
+import { workflowPolicy, enforceReplayPolicy } from '../scripts/lib/workflow-policy.mjs';
+import { Laya, beginModelWarmup, waitModelWarmup } from '../scripts/lib/model.mjs';
 
 function temporary(t) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'laya-state-'));

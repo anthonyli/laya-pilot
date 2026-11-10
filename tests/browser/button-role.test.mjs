@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { Engine } from '../../lib/engine.mjs';
-import { expectation } from '../../lib/language.mjs';
+import { Engine } from '../../scripts/lib/engine.mjs';
+import { expectation } from '../../scripts/lib/language.mjs';
 
 test('button expectation enforces role even with same-name controls', async () => {
     assert.equal(expectation('页面显示「保存」按钮').role, 'button');

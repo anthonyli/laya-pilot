@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describe, expectation, variables, lines, parseData } from '../lib/language.mjs';
+import { describe, expectation, variables, lines, parseData } from '../scripts/lib/language.mjs';
 test('Chinese/English values preserved, including empty strings', () => {
     assert.deepEqual(describe('在“客户名称”输入框输入“张三”'), {
         verb: 'fill',

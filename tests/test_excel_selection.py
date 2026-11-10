@@ -60,7 +60,7 @@ class ExcelSelectionTests(unittest.TestCase):
         completed = subprocess.run(
             [
                 'node',
-                str(ROOT / 'runner.mjs'),
+                str(ROOT / 'scripts/runner.mjs'),
                 '--excel',
                 str(self.workbook),
                 '--inspect',

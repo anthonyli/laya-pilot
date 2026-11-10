@@ -5,24 +5,23 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Laya } from '../lib/model.mjs';
-import { Workflow } from '../lib/workflow.mjs';
-import { matchReplayTarget } from '../lib/replay-model.mjs';
+import { Laya } from '../scripts/lib/model.mjs';
+import { Workflow } from '../scripts/lib/workflow.mjs';
+import { loadLocalEnvironment } from '../scripts/lib/project-config.mjs';
+import { matchReplayTarget } from '../scripts/lib/replay-model.mjs';
 
 test(
     'real local Laya grounds replay actions and fields with production confidence gates',
     { timeout: 120000 },
     async (t) => {
-        const config = JSON.parse(
-            await fs.readFile(process.env.LAYA_TEST_CONFIG || 'config.local.json', 'utf8'),
-        );
+        await loadLocalEnvironment(fileURLToPath(new URL('..', import.meta.url)));
         process.env.HF_HUB_OFFLINE = '1';
         process.env.TRANSFORMERS_OFFLINE = '1';
         const out = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-real-model-'));
         const laya = new Laya(
-            process.env.LAYA_TEST_PYTHON || config.python || 'python3',
-            fileURLToPath(new URL('../worker.py', import.meta.url)),
-            process.env.LAYA_TEST_MODEL || config.model,
+            process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3',
+            fileURLToPath(new URL('../scripts/worker.py', import.meta.url)),
+            process.env.LAYA_TEST_MODEL || process.env.LAYA_MODEL,
             path.join(out, 'decisions.ndjson'),
         );
         try {

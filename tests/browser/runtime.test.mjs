@@ -6,13 +6,13 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { Workflow } from '../../lib/workflow.mjs';
-import { observe } from '../../lib/dom.mjs';
-import { inspectForm } from '../../lib/form.mjs';
-import { executeDiscovery, discoveryCandidates } from '../../lib/discovery.mjs';
-import { target } from '../../lib/dom.mjs';
-import { openBrowser } from '../../lib/browser-provider.mjs';
-import { ensureAuthentication, saveAuthState } from '../../lib/auth-state.mjs';
+import { Workflow } from '../../scripts/lib/workflow.mjs';
+import { observe } from '../../scripts/lib/dom.mjs';
+import { inspectForm } from '../../scripts/lib/form.mjs';
+import { executeDiscovery, discoveryCandidates } from '../../scripts/lib/discovery.mjs';
+import { target } from '../../scripts/lib/dom.mjs';
+import { openBrowser } from '../../scripts/lib/browser-provider.mjs';
+import { ensureAuthentication, saveAuthState } from '../../scripts/lib/auth-state.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const python = process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3';
@@ -174,7 +174,7 @@ async function cli(name, args, interruptOnWrite = false, extraEnv = {}) {
     const child = spawn(
         process.execPath,
         [
-            'runner.mjs',
+            'scripts/runner.mjs',
             '--headless',
             '--lazy-model',
             '--python',

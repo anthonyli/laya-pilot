@@ -7,7 +7,9 @@ import unittest
 from unittest.mock import patch
 from openpyxl import Workbook
 
-spec = importlib.util.spec_from_file_location('worker', Path(__file__).parents[1] / 'worker.py')
+spec = importlib.util.spec_from_file_location(
+    'worker', Path(__file__).parents[1] / 'scripts/worker.py'
+)
 worker = importlib.util.module_from_spec(spec)
 with patch.object(sys, 'stdin', io.StringIO('')):
     spec.loader.exec_module(worker)

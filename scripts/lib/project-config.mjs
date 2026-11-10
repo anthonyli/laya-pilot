@@ -28,6 +28,16 @@ export async function loadLocalEnvironment(root) {
         'BROWSER_HEADLESS',
         'TEST_AUTH_STATE',
         'TEST_AUTH_CHECK',
+        'TEST_AUTH_SESSION_STORAGE',
+        'TEST_EXCEL',
+        'TEST_LANGUAGE',
+        'TEST_TEMPLATE_EXCEL',
+        'TEST_CASE_FILE',
+        'TEST_OUTPUT',
+        'TEST_OPERATIONS',
+        'TEST_DATA',
+        'LAYA_LAZY_MODEL',
+        'LAYA_API_TIMEOUT',
     ]);
     for (const [index, raw] of source.split(/\r?\n/).entries()) {
         const line = raw.trim();
@@ -97,4 +107,16 @@ export function configuredFlag(args, name, env, file, fallback = false) {
     if (value === 'true' || value === '1') return true;
     if (value === 'false' || value === '0') return false;
     throw Error(`${name} must be true or false`);
+}
+
+// Values are literal JSON data; parse errors never echo potentially private inputs.
+export function environmentData(fallback = {}) {
+    if (!process.env.TEST_DATA) return fallback;
+    try {
+        const value = JSON.parse(process.env.TEST_DATA);
+        if (!value || Array.isArray(value) || typeof value !== 'object') throw Error();
+        return value;
+    } catch {
+        throw Error('TEST_DATA must be a JSON object');
+    }
 }

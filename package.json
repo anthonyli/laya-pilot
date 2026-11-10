@@ -20,8 +20,8 @@
         "test:model": "node --test tests/real-model.smoke.mjs",
         "skill:package": "uv run --no-project python scripts/package_skill.py",
         "skill:check": "uv run --no-project python scripts/package_skill.py --check",
-        "start": "node runner.mjs",
-        "demo": "node examples/demo-server.mjs"
+        "start": "node scripts/run.mjs",
+        "demo": "node scripts/demo-server.mjs"
     },
     "dependencies": {
         "playwright": "1.62.1"

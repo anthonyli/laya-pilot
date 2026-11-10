@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Engine } from '../lib/engine.mjs';
+import { Engine } from '../scripts/lib/engine.mjs';
 const fakePage = { on() {} };
 test('Writes and confirmation cannot be smuggled through a read-only step', () => {
     const read = new Engine(fakePage, null, { allowWrite: false });

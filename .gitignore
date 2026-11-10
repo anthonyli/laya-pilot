@@ -1,26 +1,32 @@
+# Installed dependencies and caches
 node_modules/
 .venv/
 __pycache__/
-.ruff_cache/
 *.pyc
+.ruff_cache/
+.codebase-memory/
+.codegraph/
 .DS_Store
+
+# Local configuration, authentication and models
 .env
 .env.*
 !.env.example
 *.local.json
 *.local.sh
 config.json
+.auth/
+storage-state*.json
+models/
+*.safetensors
+
+# Generated distributions and test output
+dist/
+/manifest.json
 runs/
 generated-cases/
 validation/
 latest-run.json
 *.trace.zip
-*.safetensors
-models/
-storage-state*.json
 test-results/
 playwright-report/
-dist/laya-pilot-skill.zip
-skills/laya-pilot/manifest.json
-
-.auth/

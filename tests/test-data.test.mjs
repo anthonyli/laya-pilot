@@ -5,7 +5,7 @@ import {
     chooseTestOption,
     chooseFieldValue,
     tomorrowDate,
-} from '../lib/test-data.mjs';
+} from '../scripts/lib/test-data.mjs';
 
 test('candidate generation excludes administrator roles and preserves observed values', async () => {
     const options = ['超级管理员', '普通用户', '测试用户'].map((name) => ({ name }));

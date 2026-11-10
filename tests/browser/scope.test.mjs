@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { Engine } from '../../lib/engine.mjs';
+import { Engine } from '../../scripts/lib/engine.mjs';
 
 test('text assertions honor a unique dialog or list', async () => {
     const browser = await chromium.launch({ headless: true });

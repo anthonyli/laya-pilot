@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateWorkflow } from '../lib/workflow.mjs';
-import { generatedInputValue, invalidExampleValue } from '../lib/form.mjs';
+import { validateWorkflow } from '../scripts/lib/workflow.mjs';
+import { generatedInputValue, invalidExampleValue } from '../scripts/lib/form.mjs';
 
 const file = () => ({
     schemaVersion: 1,

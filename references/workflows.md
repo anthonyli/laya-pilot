@@ -4,12 +4,14 @@
 
 ## 入口与文件参数
 
-| 用户功能           | 输入                                                     | 入口                         | 工作流                                          |
-| ------------------ | -------------------------------------------------------- | ---------------------------- | ----------------------------------------------- |
-| 执行用例（主功能） | 现有 Excel 或 LayaPilot 生成的 Excel、测试地址与登录方式 | `--excel` 或配置中的 `excel` | 自动识别 → 解析/校验 → 执行 → 断言 → 报告       |
-| 生成用例（按需）   | 页面地址与允许的操作范围                                 | `--mode generate`            | 观察 → 选择测试 → 实际执行验证 → 导出用例与结果 |
+收到地址后，先按 [SKILL.md 的任务分流规则](../SKILL.md#收到地址时先区分任务)确定是生成新用例还是执行已有 Excel。地址本身不代表生成请求；意图不明时先询问并等待回答。已明确执行但缺少 Excel 时补齐文件，已明确生成时进入生成流程；当前对话已确认的选择不重复询问。
 
-- `--excel` / 配置中的 `excel`：统一执行输入，不作为生成模板。
+| 用户功能           | 输入                                                     | 入口              | 工作流                                          |
+| ------------------ | -------------------------------------------------------- | ----------------- | ----------------------------------------------- |
+| 执行用例（主功能） | 现有 Excel 或 LayaPilot 生成的 Excel、测试地址与登录方式 | `--excel`         | 自动识别 → 解析/校验 → 执行 → 断言 → 报告       |
+| 生成用例（按需）   | 页面地址与允许的操作范围                                 | `--mode generate` | 观察 → 选择测试 → 实际执行验证 → 导出用例与结果 |
+
+- `--excel`：统一执行输入，不作为生成模板。
 - `--case-file`：生成时的输出路径。旧 `--mode execute --case-file` 仍接受生成文件作为输入，保留兼容。
 - `--template-excel`：用户明确指定生成模板时使用。
 - `--inspect`：只检查文件、步骤与计划，不启动浏览器或模型，不是独立模式。
@@ -17,7 +19,7 @@
 
 ## 执行用例：统一入口
 
-用户提供普通测试 Excel、生成工作簿，或在 skill 根目录 `config.local.json` 的 `excel` 中设置绝对路径，都使用同一个入口：
+每次任务提供普通测试 Excel 或生成工作簿的路径，以及目标 URL，使用同一个入口：
 
 ```bash
 node scripts/run.mjs --excel '/absolute/path/cases.xlsx' --inspect
@@ -25,7 +27,7 @@ node scripts/run.mjs --excel '/absolute/path/cases.xlsx' \
   --url 'https://your-test-app.example/customers' --headless
 ```
 
-配置已填好 `excel` 和目标地址时，可直接运行 `node scripts/run.mjs --headless`。普通工作簿需要测试地址；生成工作簿也可使用计划中保存的模块地址，覆盖地址时须保持相同模块路径。
+普通工作簿需要测试地址。生成工作簿可在确认属于本次任务后使用计划中保存的模块地址，覆盖地址时须保持相同模块路径；不要把本次 Excel 或 URL 写进 `.env.local`。
 
 执行顺序：
 
@@ -64,7 +66,7 @@ node scripts/run.mjs --mode generate \
 
 `search/view/edit/delete` 依赖本轮 `create`，只操作本轮记录；未选 `delete` 会保留记录。省略 `--operations` 使用默认策略，包括有边界的 `discover` 补充测试，不扩大用户已经限定的范围。
 
-只有实际执行并通过页面断言的用例会进入生成工作簿；`执行结果.xlsx` 记录全部生成尝试，包括失败和不适用项。`--case-file` 是输出，模板默认使用内置 17 列结构，用户指定时才使用 `--template-excel`。配置中的 `excel` 回归文件不会被借作模板。
+只有实际执行并通过页面断言的用例会进入生成工作簿；`执行结果.xlsx` 记录全部生成尝试，包括失败和不适用项。`--case-file` 是输出，模板默认使用内置 17 列结构，用户指定时才使用 `--template-excel`。`--excel` 指定的回归文件不会被借作模板。
 
 生成后的用例仍走统一执行入口：
 
@@ -77,21 +79,20 @@ node scripts/run.mjs --excel generated-cases/customers.xlsx \
 
 ## 配置、登录与产物
 
-默认读取 skill 根目录的 `config.local.json` 和 `.env.local`；`--config` 可切换 JSON 文件。密码和 API 密钥只通过环境变量、`.env.local` 或隐藏输入提供，不写进命令行、JSON 配置或回复。
+默认只读取 skill 根目录的 `.env.local`，保存 API、账号和登录态配置；测试地址、Excel 和运行选项每次任务通过命令行传入。高级参数见 [安装说明](setup.md#高级参数)。密码和 API 密钥只通过环境变量、`.env.local` 或隐藏输入提供，不写进命令行、JSON 配置或回复。
 
-登录态使用 `--auth-state` 配合登录后唯一标记 `--auth-check`。复杂登录用可见浏览器和 `--manual-login`，不能同时加 `--headless`；需要用户完成交互时保留进程。公开 demo 使用 `node runtime/examples/demo-server.mjs` 启动，本次任务结束后关闭由自己启动的进程。
+登录态使用 `--auth-state` 配合登录后唯一标记 `--auth-check`。复杂登录用可见浏览器和 `--manual-login`，不能同时加 `--headless`；需要用户完成交互时保留进程。公开 demo 使用 `node scripts/demo-server.mjs` 启动，本次任务结束后关闭由自己启动的进程。
 
-用户要求保留登录后，可在 skill 的 `config.local.json` 中设置以下字段；实际选择器需要从目标登录后的页面确定，不直接照抄示例：
+用户要求保留登录后，可在 skill 的 `.env.local` 中设置以下字段；实际选择器需要从目标登录后的页面确定，不直接照抄示例：
 
-```json
-{
-    "authState": "/absolute/path/to/laya-pilot/.auth/site-account.json",
-    "authCheck": "[data-testid=\"authenticated-user\"]",
-    "authSessionStorage": true
-}
+```dotenv
+TEST_AUTH_STATE=/absolute/path/to/laya-pilot/.auth/site-account.json
+TEST_AUTH_CHECK='[data-testid="authenticated-user"]'
 ```
 
-`authSessionStorage` 仅在系统需要时启用。登录态绑定站点 origin 和 `user` 账号标识；文件权限为 `0600`。首次登录成功后保存，下次无需 `--manual-login`，先验证再复用。失效时重新登录，`--auth-reset` 可显式忽略旧状态。报告的 `authStatus` 区分 `reused`、`logged-in`、`not-required` 与 `failed`；登录失败记为阻断，并保存遮罩后的证据，不录制登录过程的 trace。
+仅在系统依赖 sessionStorage 时额外设置 `TEST_AUTH_SESSION_STORAGE=true`。
+
+登录态绑定站点 origin 和 `TEST_USER` 账号标识；文件权限为 `0600`。首次登录成功后保存，下次无需 `--manual-login`，先验证再复用。失效时重新登录，`--auth-reset` 可显式忽略旧状态。报告的 `authStatus` 区分 `reused`、`logged-in`、`not-required` 与 `failed`；登录失败记为阻断，并保存遮罩后的证据，不录制登录过程的 trace。
 
 只读生成的 `filters` 验证控件可见，不证明查询结果或重置行为正确。无法唯一识别的筛选入口会明确记录未覆盖；需要验证业务查询结果时，提供相应步骤和预期。
 

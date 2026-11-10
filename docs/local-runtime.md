@@ -2,19 +2,19 @@
 
 本轮优先级是准确、快速、稳定。浏览器继续使用 Playwright；默认决策来源为本地 Laya，不自动切换外部模型。**本地模型默认启动即预热**，与浏览器准备、登录态恢复并行；业务测试开始前等待模型就绪，避免在表单中途首次加载。控制台和结果中的 `modelStartup` 单独报告预热状态与耗时。每次独立 CLI 进程仍需一次冷启动，当前没有跨进程常驻模型服务。
 
-回放时，点击、填表、日期和下拉字段均经模型匹配当前页面目标，唯一匹配也会进入决策入口；纯断言不调用模型。相同请求可以命中本轮缓存，`modelCalls` 与 `cacheHits` 分开统计，决策日志阶段为 `replay-target`。可显式传 `--lazy-model` 或配置 `"lazyModel": true` 使用按需加载；API 来源不发送预热请求。Excel 读写仍需 Python + `openpyxl`；CI 的浏览器回归使用明确的模型替身与 `--lazy-model`，真实权重推理需单独验收。
+回放时，点击、填表、日期和下拉字段均经模型匹配当前页面目标，唯一匹配也会进入决策入口；纯断言不调用模型。相同请求可以命中本轮缓存，`modelCalls` 与 `cacheHits` 分开统计，决策日志阶段为 `replay-target`。可显式传 `--lazy-model` 或在 `.env.local` 设置 `LAYA_LAZY_MODEL=true` 使用按需加载；API 来源不发送预热请求。Excel 读写仍需 Python + `openpyxl`；CI 的浏览器回归使用明确的模型替身与 `--lazy-model`，真实权重推理需单独验收。
 
 ## 操作范围与数据
 
 ```bash
-node runner.mjs --mode generate --headless \
+node scripts/runner.mjs --mode generate --headless \
   --url http://127.0.0.1:8765/customers \
   --operations table,filters,create,search,view,edit,delete \
   --case-file generated-cases/customers.xlsx
-node runner.mjs --excel generated-cases/customers.xlsx --headless --allow-write
+node scripts/runner.mjs --excel generated-cases/customers.xlsx --headless --allow-write
 ```
 
-`--operations` 也可在 JSON 配置中写成数组。省略时仍使用完整生成策略；`--read-only` 将范围限制为 `tabs,tab-switch,table,filters`。其中 `filters` 验证名称/账号筛选输入框，以及页面提供的搜索、重置控件可见，不代表筛选业务逻辑通过。只读是执行器允许的步骤范围，不是网络层阻止所有写请求。
+`--operations` 也可在 `.env.local` 中通过 `TEST_OPERATIONS=table,filters` 设置。省略时仍使用完整生成策略；`--read-only` 将范围限制为 `tabs,tab-switch,table,filters`。其中 `filters` 验证名称/账号筛选输入框，以及页面提供的搜索、重置控件可见，不代表筛选业务逻辑通过。只读是执行器允许的步骤范围，不是网络层阻止所有写请求。
 
 `search/view/edit/delete` 只操作本轮创建的数据，必须同时选择 `create`。`create,delete` 可以独立运行，不必先编辑。未选 `delete` 时保留本轮记录，报告显示 `retainedRecord`；删除失败或写入结果不确定时保留证据，不进行猜测性清理。回放时若工作簿包含超出当前范围的用例，会整体拒绝，不静默跳过。
 
@@ -22,7 +22,7 @@ node runner.mjs --excel generated-cases/customers.xlsx --headless --allow-write
 
 下拉值来自页面真实候选。生成阶段由本地 Laya 判断选项类别，组内采用稳定顺序选择并优先叶节点。实际选择路径写入 Excel，回放由模型匹配下拉字段，再按原路径精确选择。字段判断不确定、指定值缺失或重名时失败，不自行更换用例数据。角色名称中的管理员候选不参与自动生成选择，但名称分类不能证明角色的实际权限，也不是通用业务规划模型。
 
-`--data fields.local.json` 或配置中的 `data` 对象可选地覆盖必填文本和下拉路径，例如 `{"联系电话":"13800000000","级别":"标准"}`。它不是生成用例的前置要求。普通字段值会固化到生成的 Excel；改变这些值需重新生成。当前不提供任意数据生成脚本或跨账号清理规则。
+`--data fields.local.json` 或 `.env.local` 中的 `TEST_DATA` JSON 对象可选地覆盖必填文本和下拉路径，例如 `{"联系电话":"13800000000","级别":"标准"}`。它不是生成用例的前置要求。普通字段值会固化到生成的 Excel；改变这些值需重新生成。当前不提供任意数据生成脚本或跨账号清理规则。
 
 原生 `select` 在已识别的 Ant/Element 表单项内通过 `selectOption` 选择并读取结果验证；重名选项会失败。虚拟列表、任意自定义下拉和新弹窗结构尚未获得通用支持。
 
@@ -31,11 +31,11 @@ node runner.mjs --excel generated-cases/customers.xlsx --headless --allow-write
 首次使用可自动登录，复杂登录页可先进行一次可见的手动登录：
 
 ```bash
-node runner.mjs --mode generate --config config.local.json \
+node scripts/runner.mjs --mode generate \
   --manual-login --auth-state .auth/tester.json \
   --auth-check '[data-testid="current-user"]' --read-only
 
-node runner.mjs --mode generate --config config.local.json --headless \
+node scripts/runner.mjs --mode generate --headless \
   --auth-state .auth/tester.json \
   --auth-check '[data-testid="current-user"]' --read-only
 ```
@@ -79,9 +79,9 @@ SIGINT/SIGTERM 会尽力保存部分结果与 trace 并关闭浏览器；SIGKILL
 npm test
 python3 -m unittest discover -s tests -p 'test_*.py'
 LAYA_TEST_PYTHON=/path/to/python-with-openpyxl npm run test:browser
-npm run test:model # 使用 config.local.json 的本地 Python 和已下载权重，强制离线
+npm run test:model # 使用 .env.local 的本地 Python 和已下载权重，强制离线
 ```
 
 浏览器回归仅访问临时启动的 `127.0.0.1` 站点或内存测试页面，使用真实无头 Chromium：覆盖生成→Excel→新会话回放、动态 DOM ID、操作范围、HTTP 500、写入期间中断、Cookie/localStorage/sessionStorage/IndexedDB 复用与失效、原生下拉、重复记录与同名前缀、独立账号/用户名、相对日期、固定操作列和没有 tabindex 的图标。产物保留在 `runs/browser-regression-*`，不调用外部模型。
 
-浏览器回归验证执行器协议与本地 fixture，不证明任意内网站点的成功率。`test:model` 使用真实本地权重验证回放提示、控件和字段匹配及默认置信度门槛，可通过 `LAYA_TEST_CONFIG`、`LAYA_TEST_PYTHON`、`LAYA_TEST_MODEL` 指定本机配置；不会访问业务系统。真实业务页面、较慢网络、分页/虚拟列表与歧义控件仍需单独验收。本地或内网通用模型尚未进行 Browser Use 对比，见[评估记录](browser-use-evaluation.md)。
+浏览器回归验证执行器协议与本地 fixture，不证明任意内网站点的成功率。`test:model` 使用真实本地权重验证回放提示、控件和字段匹配及默认置信度门槛，可通过 `LAYA_TEST_PYTHON`、`LAYA_TEST_MODEL` 指定本机配置；不会访问业务系统。真实业务页面、较慢网络、分页/虚拟列表与歧义控件仍需单独验收。本地或内网通用模型尚未进行 Browser Use 对比，见[评估记录](browser-use-evaluation.md)。

@@ -8,7 +8,7 @@ import {
     safeUrl,
     severeEvent,
     registerSecret,
-} from '../lib/diagnostics.mjs';
+} from '../scripts/lib/diagnostics.mjs';
 
 test('browser and interface errors are attributed only to the active case', async () => {
     const page = new EventEmitter(),

@@ -2,12 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { loadLocalEnvironment, loadProjectConfig } from '../runtime/lib/project-config.mjs';
-import { safeText, safeUrl } from '../runtime/lib/diagnostics.mjs';
+import { loadLocalEnvironment } from './lib/project-config.mjs';
+import { safeText, safeUrl } from './lib/diagnostics.mjs';
 
 export const skillRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const runtimeRoot = path.join(skillRoot, 'runtime');
-export const defaultConfig = path.join(skillRoot, 'config.local.json');
 export const venvPython = path.join(
     skillRoot,
     '.venv',
@@ -19,20 +17,24 @@ export function skillVersion() {
     const file = path.join(skillRoot, 'manifest.json');
     return fs.existsSync(file)
         ? JSON.parse(fs.readFileSync(file, 'utf8'))
-        : { version: 'source', contentHash: null };
+        : {
+              version: JSON.parse(fs.readFileSync(path.join(skillRoot, 'package.json'), 'utf8'))
+                  .version,
+              contentHash: null,
+          };
 }
 
 export async function resolveSkillSettings(args, provider = option(args, '--provider') || 'api') {
     const loaded = await loadLocalEnvironment(skillRoot);
-    const configPath =
-        option(args, '--config') || (fs.existsSync(defaultConfig) ? defaultConfig : '');
-    const fileConfig = await loadProjectConfig(configPath);
+    if (args.includes('--config'))
+        throw Error(
+            'Use the skill .env.local for configuration; --config is no longer supported by the skill.',
+        );
     const sources = {};
     const value = (field, cli, env, fallback = '') => {
         const candidates = [
             [option(args, cli), 'cli'],
             [process.env[env], `${loaded.includes(env) ? '.env.local' : 'env'}:${env}`],
-            [fileConfig[field], 'config'],
             [fallback, 'default'],
         ];
         const selected = candidates.find(([v]) => v !== undefined && v !== null && v !== '') || [
@@ -67,7 +69,6 @@ export async function resolveSkillSettings(args, provider = option(args, '--prov
         version: version.version,
         contentHash: version.contentHash,
         cwd: process.cwd(),
-        configPath: configPath ? path.resolve(configPath) : null,
         envPath: path.join(skillRoot, '.env.local'),
         provider,
         python: safeText(settings.python, 1000),
@@ -85,7 +86,7 @@ export async function resolveSkillSettings(args, provider = option(args, '--prov
         ),
         sources,
     };
-    return { configPath, fileConfig, settings, summary };
+    return { settings, summary };
 }
 
 export function option(args, name) {
@@ -102,21 +103,16 @@ export function requireNode() {
 }
 
 export function initializeConfig() {
-    for (const [source, target] of [
-        ['.env.example', '.env.local'],
-        ['config.example.json', 'config.local.json'],
-    ]) {
-        const destination = path.join(skillRoot, target);
-        try {
-            fs.copyFileSync(
-                path.join(skillRoot, 'assets', source),
-                destination,
-                fs.constants.COPYFILE_EXCL,
-            );
-            fs.chmodSync(destination, 0o600);
-        } catch (error) {
-            if (error.code !== 'EEXIST') throw error;
-        }
+    const destination = path.join(skillRoot, '.env.local');
+    try {
+        fs.copyFileSync(
+            path.join(skillRoot, 'assets', '.env.example'),
+            destination,
+            fs.constants.COPYFILE_EXCL,
+        );
+        fs.chmodSync(destination, 0o600);
+    } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
     }
 }
 

@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import vm from 'node:vm';
-import { PendingWrites } from '../lib/pending-writes.mjs';
-import { Workflow, validateWorkflow } from '../lib/workflow.mjs';
-import { observe } from '../lib/dom.mjs';
-import { inspectLooseRequired, looseInputRef, formErrors } from '../lib/form.mjs';
+import { PendingWrites } from '../scripts/lib/pending-writes.mjs';
+import { Workflow, validateWorkflow } from '../scripts/lib/workflow.mjs';
+import { observe } from '../scripts/lib/dom.mjs';
+import { inspectLooseRequired, looseInputRef, formErrors } from '../scripts/lib/form.mjs';
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const quietPage = () => ({
     waitForLoadState: async () => {},

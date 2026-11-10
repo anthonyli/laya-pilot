@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { Workflow } from '../lib/workflow.mjs';
+import { Workflow } from '../scripts/lib/workflow.mjs';
 
 function setup() {
     const page = new EventEmitter();

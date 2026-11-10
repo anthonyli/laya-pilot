@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location(
-    'workflow_excel', Path(__file__).resolve().parents[1] / 'lib/workflow_excel.py'
+    'workflow_excel', Path(__file__).resolve().parents[1] / 'scripts/lib/workflow_excel.py'
 )
 excel = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(excel)

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { matchReplayTarget } from '../lib/replay-model.mjs';
-import { Workflow } from '../lib/workflow.mjs';
+import { matchReplayTarget } from '../scripts/lib/replay-model.mjs';
+import { Workflow } from '../scripts/lib/workflow.mjs';
 
 test('replay grounds the recorded option among live alternatives with at most eight criteria', async () => {
     const candidates = Array.from({ length: 12 }, (_, i) => ({ name: `选项${i}` }));

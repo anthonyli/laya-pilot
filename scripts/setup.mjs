@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { loadLocalEnvironment } from '../runtime/lib/project-config.mjs';
-import { safeText } from '../runtime/lib/diagnostics.mjs';
+import { loadLocalEnvironment } from './lib/project-config.mjs';
+import { safeText } from './lib/diagnostics.mjs';
 import {
     findPython,
     initializeConfig,
@@ -12,7 +12,6 @@ import {
     pythonVersion,
     requireNode,
     run,
-    runtimeRoot,
     skillRoot,
     venvPython,
     resolveSkillSettings,
@@ -27,11 +26,11 @@ function check(local, resolved) {
     checks.push(['Python 3.10+', Boolean(pythonVersion(python))]);
     const probe = (source) => spawnSync(python, ['-c', source], { stdio: 'ignore' }).status === 0;
     checks.push(['Python openpyxl', probe('import openpyxl')]);
-    const installed = fs.existsSync(path.join(runtimeRoot, 'node_modules', 'playwright'));
+    const installed = fs.existsSync(path.join(skillRoot, 'node_modules', 'playwright'));
     checks.push(['Playwright dependency', installed]);
     let browser = false;
     if (installed) {
-        const require = createRequire(path.join(runtimeRoot, 'package.json'));
+        const require = createRequire(path.join(skillRoot, 'package.json'));
         browser = fs.existsSync(require('playwright').chromium.executablePath());
     }
     checks.push(['Playwright Chromium', browser]);
@@ -69,7 +68,7 @@ function check(local, resolved) {
 try {
     requireNode();
     const args = process.argv.slice(2);
-    const valueOptions = ['--python', '--config', '--model', '--api-base', '--api-model'];
+    const valueOptions = ['--python', '--model', '--api-base', '--api-model'];
     const allowed = new Set([
         '--check',
         '--skip-browser',
@@ -108,17 +107,17 @@ try {
                 ]);
             }
             if (!pythonVersion(venvPython)) throw Error('The skill venv requires Python 3.10+.');
-            await run(npm, [...prefix, 'ci', '--omit=dev'], { cwd: runtimeRoot });
+            await run(npm, [...prefix, 'ci', '--omit=dev'], { cwd: skillRoot });
             await run(venvPython, [
                 '-m',
                 'pip',
                 'install',
                 '-r',
-                path.join(runtimeRoot, local ? 'requirements-local.txt' : 'requirements.txt'),
+                path.join(skillRoot, local ? 'requirements-local.txt' : 'requirements.txt'),
             ]);
             if (!args.includes('--skip-browser'))
                 await run(process.execPath, [
-                    path.join(runtimeRoot, 'node_modules', 'playwright', 'cli.js'),
+                    path.join(skillRoot, 'node_modules', 'playwright', 'cli.js'),
                     'install',
                     'chromium',
                 ]);
@@ -134,7 +133,7 @@ try {
             console.log(
                 local
                     ? 'Local model ready. Run scripts/run.mjs with --provider local to use it.'
-                    : 'API runtime ready. Fill API settings in the skill .env.local and the target URL in config.local.json. No local model was installed or downloaded.',
+                    : 'API runtime ready. Fill API settings and TEST_URL / TEST_EXCEL in the skill .env.local. No local model was installed or downloaded.',
             );
         }
     }

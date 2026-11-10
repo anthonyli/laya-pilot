@@ -1,3 +1,0 @@
-interface:
-    display_name: 'LayaPilot'
-    short_description: '执行用户已有 Excel 用例的浏览器回归测试，输出报告与失败证据'

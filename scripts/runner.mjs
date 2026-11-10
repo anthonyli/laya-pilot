@@ -15,11 +15,12 @@ import {
     loadProjectConfig,
     configured,
     configuredFlag,
+    environmentData,
 } from './lib/project-config.mjs';
 import { Engine } from './lib/engine.mjs';
 import { describe, expectation, lines } from './lib/language.mjs';
 import { settle } from './lib/dom.mjs';
-const ROOT = path.dirname(fileURLToPath(import.meta.url)),
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
     args = process.argv.slice(2);
 const arg = (n, d) => {
     const i = args.indexOf(n);
@@ -39,7 +40,7 @@ const config = {
     python: option('--python', 'LAYA_PYTHON', 'python', path.join(ROOT, '.venv', 'bin', 'python')),
     model: option('--model', 'LAYA_MODEL', 'model', 'convaiinnovations/laya-multilingual'),
     provider: option('--provider', 'LAYA_PROVIDER', 'provider', 'local'),
-    lazyModel: configuredFlag(args, '--lazy-model', null, fileConfig.lazyModel),
+    lazyModel: configuredFlag(args, '--lazy-model', 'LAYA_LAZY_MODEL', fileConfig.lazyModel),
     apiBase: option('--api-base', 'LAYA_API_BASE', 'apiBase', ''),
     apiModel: option('--api-model', 'LAYA_API_MODEL', 'apiModel', 'laya-decision'),
     apiTimeout: Number(option('--api-timeout', 'LAYA_API_TIMEOUT', 'apiTimeout', 30000)),
@@ -56,10 +57,10 @@ const config = {
     authSessionStorage: configuredFlag(
         args,
         '--auth-session-storage',
-        null,
+        'TEST_AUTH_SESSION_STORAGE',
         fileConfig.authSessionStorage,
     ),
-    operations: option('--operations', null, 'operations', ''),
+    operations: option('--operations', 'TEST_OPERATIONS', 'operations', ''),
     headless: configuredFlag(args, '--headless', 'BROWSER_HEADLESS', fileConfig.headless),
     allowWrite: flag('--allow-write') && !flag('--read-only'),
     readOnly: flag('--read-only'),
@@ -76,7 +77,7 @@ const config = {
     minProbability: Number(arg('--min-probability', '0.68')),
     minMargin: Number(arg('--min-margin', '0.18')),
     cases: arg('--cases', '').split(',').filter(Boolean),
-    data: fileConfig.data || {},
+    data: arg('--data', '') ? {} : environmentData(fileConfig.data || {}),
     runId,
     out: path.resolve(option('--out', 'TEST_OUTPUT', 'out', path.join(ROOT, 'runs', runId))),
 };
@@ -200,7 +201,7 @@ let laya, browser, activePage;
 async function main() {
     if (flag('--help')) {
         console.log(
-            'LayaPilot · 用例回归\n执行：./run.sh --excel 用例.xlsx --url 页面地址 --headless；自动识别普通用例或结构化计划\n检查：./run.sh --excel 用例.xlsx --inspect\n生成：./run.sh --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n旧命令兼容：./run.sh --mode execute --case-file 用例.xlsx [--url 页面地址]\n--allow-write：允许已授权的写操作；--cases：仅普通Excel编号筛选。\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。',
+            'LayaPilot · 用例回归\n执行：node scripts/runner.mjs --excel 用例.xlsx --url 页面地址 --headless；自动识别普通用例或结构化计划\n检查：node scripts/runner.mjs --excel 用例.xlsx --inspect\n生成：node scripts/runner.mjs --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n旧命令兼容：node scripts/runner.mjs --mode execute --case-file 用例.xlsx [--url 页面地址]\n--allow-write：允许已授权的写操作；--cases：仅普通Excel编号筛选。\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。',
         );
         console.log(
             '--auth-state 文件：保存/复用登录态；--auth-reset：重新登录；--auth-check CSS：登录成功标记；--auth-session-storage：保存当前站点 sessionStorage',
@@ -296,7 +297,7 @@ async function main() {
             : undefined;
     laya = new Laya(
         config.python,
-        path.join(ROOT, 'worker.py'),
+        path.join(ROOT, 'scripts', 'worker.py'),
         config.model,
         path.join(config.out, 'decisions.ndjson'),
         {

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import { chromium } from 'playwright';
-import { Engine } from '../../lib/engine.mjs';
+import { Engine } from '../../scripts/lib/engine.mjs';
 
 test('capture succeeds or records failure without using a stale screenshot', async () => {
     await fs.mkdir('runs', { recursive: true });

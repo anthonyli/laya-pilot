@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { expandStep, semanticStep, approvalOperation } from '../lib/planner.mjs';
-import { Engine } from '../lib/engine.mjs';
-import { Halt } from '../lib/language.mjs';
+import { expandStep, semanticStep, approvalOperation } from '../scripts/lib/planner.mjs';
+import { Engine } from '../scripts/lib/engine.mjs';
+import { Halt } from '../scripts/lib/language.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';

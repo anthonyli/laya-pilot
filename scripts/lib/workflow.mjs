@@ -1676,7 +1676,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
                     : undefined;
             laya = new Laya(
                 config.python,
-                path.join(root, 'worker.py'),
+                path.join(root, 'scripts', 'worker.py'),
                 config.model,
                 path.join(config.out, 'decisions.ndjson'),
                 {

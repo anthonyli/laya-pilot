@@ -2,7 +2,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 const port = Number(process.env.PORT || 8765);
-const html = await fs.readFile(new URL('./demo.html', import.meta.url), 'utf8');
+const html = await fs.readFile(new URL('../examples/demo.html', import.meta.url), 'utf8');
 http.createServer((req, res) => {
     if (req.url === '/favicon.ico') {
         res.writeHead(204);

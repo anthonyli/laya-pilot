@@ -8,8 +8,9 @@ import {
     configuredFlag,
     loadProjectConfig,
     loadLocalEnvironment,
-} from '../lib/project-config.mjs';
-import { openBrowser } from '../lib/browser-provider.mjs';
+    environmentData,
+} from '../scripts/lib/project-config.mjs';
+import { openBrowser } from '../scripts/lib/browser-provider.mjs';
 
 test('CLI, environment, config and defaults have explicit precedence', () => {
     const arg = (name) => (name === '--url' ? 'https://cli.example/test' : undefined);
@@ -106,4 +107,48 @@ test('unimplemented browser backends fail before opening a browser', async () =>
         openBrowser({ browserProvider: 'browser-use' }),
         /Unsupported browser provider/,
     );
+});
+
+test('environment supports all migrated runtime settings without evaluating their contents', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-runtime-env-'));
+    const values = {
+        TEST_EXCEL: '/cases/with spaces.xlsx',
+        TEST_OUTPUT: '/reports/current',
+        TEST_CASE_FILE: '/cases/generated.xlsx',
+        TEST_TEMPLATE_EXCEL: '/cases/template.xlsx',
+        TEST_LANGUAGE: 'zh-CN',
+        TEST_OPERATIONS: 'table,filters',
+        TEST_AUTH_SESSION_STORAGE: 'true',
+        LAYA_LAZY_MODEL: 'false',
+        LAYA_API_TIMEOUT: '45000',
+        TEST_DATA: '{"name":"$(not-executed)","count":0}',
+    };
+    const before = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+    try {
+        for (const key of Object.keys(values)) delete process.env[key];
+        await fs.writeFile(
+            path.join(dir, '.env.local'),
+            Object.entries(values)
+                .map(([key, value]) => `${key}='${value}'`)
+                .join('\n'),
+        );
+        await loadLocalEnvironment(dir);
+        for (const [key, value] of Object.entries(values)) assert.equal(process.env[key], value);
+        assert.equal(
+            configuredFlag([], '--auth-session-storage', 'TEST_AUTH_SESSION_STORAGE'),
+            true,
+        );
+        assert.equal(configuredFlag([], '--lazy-model', 'LAYA_LAZY_MODEL'), false);
+        assert.deepEqual(environmentData(), { name: '$(not-executed)', count: 0 });
+        process.env.TEST_DATA = 'private-invalid-content';
+        assert.throws(() => environmentData(), { message: 'TEST_DATA must be a JSON object' });
+        process.env.TEST_DATA = '[]';
+        assert.throws(() => environmentData(), { message: 'TEST_DATA must be a JSON object' });
+    } finally {
+        for (const [key, value] of Object.entries(before)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+        await fs.rm(dir, { recursive: true, force: true });
+    }
 });

@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { discoveryCandidates, selectDiscovery, validateDiscovery } from '../lib/discovery.mjs';
-import { validateWorkflow } from '../lib/workflow.mjs';
-import { enforceReplayPolicy } from '../lib/workflow-policy.mjs';
+import {
+    discoveryCandidates,
+    selectDiscovery,
+    validateDiscovery,
+} from '../scripts/lib/discovery.mjs';
+import { validateWorkflow } from '../scripts/lib/workflow.mjs';
+import { enforceReplayPolicy } from '../scripts/lib/workflow-policy.mjs';
 
 const form = {
     create: { role: 'button', name: '新增' },

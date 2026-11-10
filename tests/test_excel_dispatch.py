@@ -16,7 +16,7 @@ from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
-    'workflow_excel_dispatch', ROOT / 'lib/workflow_excel.py'
+    'workflow_excel_dispatch', ROOT / 'scripts/lib/workflow_excel.py'
 )
 workbooks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(workbooks)
@@ -70,7 +70,7 @@ class ExcelDispatchTests(unittest.TestCase):
         result = subprocess.run(
             [
                 'node',
-                str(ROOT / 'runner.mjs'),
+                str(ROOT / 'scripts/runner.mjs'),
                 '--excel',
                 str(self.workbook),
                 '--provider',
