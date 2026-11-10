@@ -271,12 +271,27 @@ def read(payload):
     meta = book[META]
     header = json.loads(meta['A1'].value)
     cases = []
-    for row in range(3, meta.max_row + 1):
+    plan_rows = [
+        row
+        for row in range(3, meta.max_row + 1)
+        if any(meta.cell(row, col).value is not None for col in (1, 2, 3))
+    ]
+    last_plan_row = max(plan_rows, default=2)
+    for other in book.worksheets:
+        if other.title in (META, sheet.title) or other.sheet_state != 'visible':
+            continue
+        for cells in other.iter_rows():
+            if any(cell.value is not None and str(cell.value).strip() for cell in cells):
+                raise ValueError(f'工作表「{other.title}」第{cells[0].row}行没有对应的隐藏回放步骤')
+    for row in range(last_plan_row, sheet.max_row + 1):
+        if any(cell.value is not None and str(cell.value).strip() for cell in sheet[row]):
+            raise ValueError(f'工作表「{sheet.title}」第{row}行没有对应的隐藏回放步骤')
+    for row in range(3, last_plan_row + 1):
         case_id, saved_hash, recipe = [meta.cell(row, col).value for col in (1, 2, 3)]
         visible_row = row - 1
         if digest(visible_fields(sheet, visible_row)) != saved_hash:
             raise ValueError(
-                f'第{visible_row}行可见用例已修改，与隐藏回放步骤不一致，请重新生成或校对后再执行'
+                f'工作表「{sheet.title}」第{visible_row}行可见用例已修改，与隐藏回放步骤不一致，请重新生成或校对后再执行'
             )
         case = json.loads(recipe)
         if case_id != sheet.cell(visible_row, 1).value:
