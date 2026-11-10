@@ -41,3 +41,28 @@ test('Negative, selected and count assertions are distinct', () => {
     assert.deepEqual(expectation('列表记录数为1'), { kind: 'rowcount', value: 1 });
     assert.equal(lines('1、点击“新增”\n2、查看页面').length, 2);
 });
+
+test('quoted semicolons stay in steps and expectations while outside separators split', () => {
+    for (const [open, close] of [
+        ['「', '」'],
+        ['“', '”'],
+        ['"', '"'],
+    ]) {
+        const step = `点击${open}a;b；c${close}`;
+        const expected = `页面显示${open}a;b；c${close}`;
+        assert.deepEqual(
+            lines(`${step}；点击「下一步」;${step}`)
+                .map(describe)
+                .map((x) => x.target),
+            ['a;b；c', '下一步', 'a;b；c'],
+        );
+        assert.deepEqual(
+            lines(`${expected};${expected}`)
+                .map(expectation)
+                .map((x) => x.target),
+            ['a;b；c', 'a;b；c'],
+        );
+    }
+    assert.equal(describe(lines('Fill "name" with "a;b；c"')[0]).value, 'a;b；c');
+    assert.equal(expectation(lines('page shows "a;b"')[0]).target, 'a;b');
+});
