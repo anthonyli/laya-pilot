@@ -159,6 +159,7 @@ async function report(results, laya, source, warnings) {
             '通过断言数',
             '断言总数',
             '截图',
+            '截图采集说明',
         ],
         ...results.map((r) => [
             r.sheet,
@@ -171,6 +172,7 @@ async function report(results, laya, source, warnings) {
             r.assertions.filter((a) => a.status === '通过').length,
             r.assertions.length,
             r.screenshot,
+            r.screenshot_error,
         ]),
     ];
     await fs.writeFile(
@@ -186,7 +188,7 @@ async function report(results, laya, source, warnings) {
             '，',
         )}。通过要求步骤完整执行且全部预期有明确断言；跳过不计通过。\n\n|编号|用例|结果|原因|截图|\n|---|---|---|---|---|\n`;
     for (const r of results)
-        md += `|${clean(r.id)}|${clean(r.title)}|${r.status}|${clean(r.reason)}|${r.screenshot ? `[截图](${r.screenshot})` : ''}|\n`;
+        md += `|${clean(r.id)}|${clean(r.title)}|${r.status}|${clean(r.reason)}${r.screenshot_error ? '；' + clean(r.screenshot_error) : ''}|${r.screenshot ? `[截图](${r.screenshot})` : ''}|\n`;
     await fs.writeFile(path.join(config.out, '报告.md'), md);
     await fs.writeFile(
         path.join(ROOT, 'latest-run.json'),

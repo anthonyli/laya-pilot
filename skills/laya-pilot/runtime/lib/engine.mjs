@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { safeText } from './diagnostics.mjs';
 import { Halt, expectation, lines, variables, parseData, norm, quoted } from './language.mjs';
 import { observe, target, settle, assertionTarget, discoverRowLabels } from './dom.mjs';
 import { waitForReady, readTables } from './readiness.mjs';
@@ -894,10 +895,13 @@ export class Engine {
         this.evidenceOccurrences.set(digest, occurrence);
         const stem = `case-${digest}-${occurrence}`;
         if (touchedPage) {
-            result.screenshot = 'evidence/' + stem + '.png';
-            await this.page
-                .screenshot({ path: path.join(this.config.out, result.screenshot) })
-                .catch(() => {});
+            const screenshot = 'evidence/' + stem + '.png';
+            try {
+                await this.page.screenshot({ path: path.join(this.config.out, screenshot) });
+                result.screenshot = screenshot;
+            } catch (error) {
+                result.screenshot_error = `截图采集失败：${safeText(error?.message || String(error))}`;
+            }
             const snap = await observe(this.page);
             await fs.writeFile(
                 path.join(this.config.out, 'evidence', stem + '-controls.json'),
