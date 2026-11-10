@@ -132,11 +132,7 @@ def main():
     }
     obsolete = actual_runtime - expected.keys()
     if args.check:
-        if (
-            not (SKILL / 'manifest.json').is_file()
-            or (SKILL / 'manifest.json').read_bytes() != files['manifest.json']
-        ):
-            stale.append('manifest.json')
+        # manifest.json is generated output (ignored by git); only bundled sources are compared.
         if stale or obsolete:
             raise SystemExit(
                 'Skill runtime is out of date: ' + ', '.join(sorted(set(stale) | obsolete))

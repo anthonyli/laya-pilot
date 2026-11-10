@@ -536,7 +536,8 @@ export class Engine {
                 status: '未验证',
                 reason: '当前断言语法无法完整解释；未用Laya评分代替结果证明',
             };
-        if (spec.scope) await this.showArea(spec.scope);
+        if (spec.scope && !['visible', 'absent'].includes(spec.kind))
+            await this.showArea(spec.scope);
         let actual,
             passed = false;
         if (spec.kind === 'tooltip') {
@@ -565,11 +566,13 @@ export class Engine {
             ];
             passed = actual.some((s) => s.includes(spec.target));
         } else if (spec.kind === 'controlVisible') {
-            const snap = await observe(page);
-            actual = snap.controls
-                .filter((c) => norm(c.name) === norm(spec.target))
-                .map((c) => ({ name: c.name, role: c.role }));
-            passed = actual.length === 1;
+            // Action candidates can have inferred roles; use accessibility semantics for assertions.
+            const buttons = page
+                .getByRole('button', { name: spec.target, exact: true })
+                .filter({ visible: true });
+            const count = await buttons.count();
+            actual = Array.from({ length: count }, () => ({ name: spec.target, role: 'button' }));
+            passed = count === 1;
         } else if (spec.kind === 'dialog') {
             const dialogs = page.locator(
                 'dialog[open]:visible,[role="dialog"]:visible,.ant-drawer-open .ant-drawer-content:visible',
@@ -626,7 +629,26 @@ export class Engine {
                       );
         } else if (spec.kind === 'visible' || spec.kind === 'absent') {
             // Check visible rendered text, not hidden DOM or a model's opinion.
-            const locator = page.getByText(spec.target, { exact: false }).filter({ visible: true });
+            let root = page;
+            if (spec.scope === '弹窗' || spec.scope === '列表') {
+                root = page
+                    .locator(
+                        spec.scope === '弹窗'
+                            ? 'dialog[open],[role="dialog"],.ant-drawer-open .ant-drawer-content'
+                            : 'table,[role="table"],[role="grid"], [role="list"]',
+                    )
+                    .filter({ visible: true });
+                const count = await root.count();
+                if (count !== 1)
+                    return {
+                        text,
+                        status: '未验证',
+                        kind: spec.kind,
+                        scope: spec.scope,
+                        reason: `无法唯一确定${spec.scope}范围（找到 ${count} 个）`,
+                    };
+            }
+            const locator = root.getByText(spec.target, { exact: false }).filter({ visible: true });
             if (spec.kind === 'visible')
                 await locator
                     .first()
@@ -711,6 +733,7 @@ export class Engine {
             text,
             status: passed ? '通过' : '失败',
             kind: spec.kind,
+            ...(spec.scope ? { scope: spec.scope } : {}),
             actual,
             reason: passed ? '明确断言满足' : '实际页面状态与该预期不符，需核对需求或定位证据',
         };
@@ -798,7 +821,8 @@ export class Engine {
                 this.phase = 'assertion';
                 for (const text of expected) {
                     try {
-                        result.assertions.push({ ...(await this.verify(text)), scope: area });
+                        const assertion = await this.verify(text);
+                        result.assertions.push({ ...assertion, scope: assertion.scope ?? area });
                     } catch (e) {
                         if (e.category === '模型API错误') throw e;
                         result.assertions.push({
