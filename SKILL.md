@@ -5,7 +5,7 @@ description: Run browser regression tests from user-provided Excel test cases fo
 
 # LayaPilot
 
-主要功能是执行用户已有的 Excel 测试用例做浏览器回归：读取用例，按原步骤和预期执行，输出报告与失败证据。仓库根目录就是本 skill；本目录包含唯一一份运行代码、依赖清单和 demo，克隆仓库或解压分发 ZIP 后均可直接安装，无需先构建。
+主要功能是执行用户已有的 Excel 测试用例做浏览器回归：读取用例，按原步骤和预期执行，输出报告与失败证据。本目录包含 skill 入口、运行代码、依赖清单和使用说明，克隆仓库或解压分发 ZIP 后均可直接安装，无需先构建。demo、开发测试和仓库维护文件仅在源码仓库中提供，不包含在交付包内。
 
 ## 两个用户入口
 

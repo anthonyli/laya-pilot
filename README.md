@@ -155,7 +155,9 @@ python3 scripts/package_skill.py --check
 python3 scripts/package_skill.py --install-to /absolute/path/installed-skill
 ```
 
-打包按需生成 `dist/laya-pilot-skill.zip`，无需提交构建产物；`--check` 比较已生成 ZIP 与当前源码。升级保留 `.env.local`、`.auth`、依赖和模型，随后在安装目录运行 `node scripts/setup.mjs` 更新依赖。旧版布局迁移细节见 [安装说明](references/setup.md)。
+交付包只保留 `SKILL.md`、运行脚本、使用说明、配置模板、运行依赖清单与许可证；排除 demo、测试、GitHub 配置、README、开发工具和打包脚本，也不包含本机配置、登录态、已安装依赖或模型。包内 npm 清单仅保留运行依赖及启动命令，源码仓库保持不变。
+
+打包按需生成 `dist/laya-pilot-skill.zip`，`dist/` 已由 Git 忽略，不提交交付产物。解压后将整个 `laya-pilot/` 目录交给接收方，按上述安装步骤使用。`--check` 比较已生成 ZIP 与当前源码。升级保留 `.env.local`、`.auth`、依赖和模型，随后在安装目录运行 `node scripts/setup.mjs` 更新依赖。升级会清理旧 manifest 记录中已不再分发的文件，包括旧版 demo；无 manifest 的旧文件不会自动删除。
 
 开发时用 `npm ci` 安装依赖，运行 `npm test`、`npm run test:browser` 和 `npm run format:check`；格式检查需要 `uv`。Python 测试及更多验证方式见 [运行指南](docs/local-runtime.md)。
 

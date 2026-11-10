@@ -81,7 +81,7 @@ node scripts/run.mjs --excel generated-cases/customers.xlsx \
 
 默认只读取 skill 根目录的 `.env.local`，保存 API、账号和登录态配置；测试地址、Excel 和运行选项每次任务通过命令行传入。高级参数见 [安装说明](setup.md#高级参数)。密码和 API 密钥只通过环境变量、`.env.local` 或隐藏输入提供，不写进命令行、JSON 配置或回复。
 
-登录态使用 `--auth-state` 配合登录后唯一标记 `--auth-check`。复杂登录用可见浏览器和 `--manual-login`，不能同时加 `--headless`；需要用户完成交互时保留进程。公开 demo 使用 `node scripts/demo-server.mjs` 启动，本次任务结束后关闭由自己启动的进程。
+登录态使用 `--auth-state` 配合登录后唯一标记 `--auth-check`。复杂登录用可见浏览器和 `--manual-login`，不能同时加 `--headless`；需要用户完成交互时保留进程。公开 demo 仅在 [源码仓库](https://github.com/anthonyli/laya-pilot#体验-demo) 中提供；skill 交付包用于执行用户提供的目标地址和用例。
 
 用户要求保留登录后，可在 skill 的 `.env.local` 中设置以下字段；实际选择器需要从目标登录后的页面确定，不直接照抄示例：
 

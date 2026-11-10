@@ -43,6 +43,9 @@ class SkillUpgradeTests(unittest.TestCase):
                     'worker.py': b'old root worker',
                     'lib/old.mjs': b'old root library',
                     'examples/demo-server.mjs': b'old demo server',
+                    'scripts/demo-server.mjs': b'old bundled demo server',
+                    'examples/demo.html': b'old bundled demo page',
+                    'examples/demo-cases.xlsx': b'old bundled demo workbook',
                     'runtime/lib/obsolete.mjs': b'old module',
                     'manifest.json': json.dumps(
                         {
@@ -55,6 +58,9 @@ class SkillUpgradeTests(unittest.TestCase):
                                     'worker.py',
                                     'lib/old.mjs',
                                     'examples/demo-server.mjs',
+                                    'scripts/demo-server.mjs',
+                                    'examples/demo.html',
+                                    'examples/demo-cases.xlsx',
                                     'runtime/lib/obsolete.mjs',
                                     *state,
                                 ],
@@ -77,7 +83,15 @@ class SkillUpgradeTests(unittest.TestCase):
             self.assertFalse((root / 'scripts/old.mjs').exists())
             self.assertFalse((root / 'assets/config.example.json').exists())
             self.assertFalse((root / 'runtime/runner.mjs').exists())
-            for name in ['runner.mjs', 'worker.py', 'lib/old.mjs', 'examples/demo-server.mjs']:
+            for name in [
+                'runner.mjs',
+                'worker.py',
+                'lib/old.mjs',
+                'examples/demo-server.mjs',
+                'scripts/demo-server.mjs',
+                'examples/demo.html',
+                'examples/demo-cases.xlsx',
+            ]:
                 self.assertFalse((root / name).exists())
             self.assertFalse((root / 'runtime/lib/obsolete.mjs').exists())
             self.assertEqual((root / 'scripts/runner.mjs').read_bytes(), b'new runner')
@@ -100,13 +114,34 @@ class SkillUpgradeTests(unittest.TestCase):
         for name in (
             'scripts/runner.mjs',
             'scripts/lib/engine.mjs',
-            'package.json',
-            'package-lock.json',
         ):
             self.assertEqual(files[name], (ROOT / name).read_bytes())
         self.assertFalse(
-            any(name.startswith(('runtime/', 'tests/', 'node_modules/')) for name in files)
+            any(
+                name.startswith(
+                    ('runtime/', 'tests/', 'node_modules/', 'examples/', '.github/', 'docs/')
+                )
+                for name in files
+            )
         )
+        for name in [
+            'scripts/demo-server.mjs',
+            'scripts/package_skill.py',
+            'README.md',
+            'README.en.md',
+        ]:
+            self.assertNotIn(name, files)
+        package = json.loads(files['package.json'])
+        lock = json.loads(files['package-lock.json'])
+        source_lock = json.loads((ROOT / 'package-lock.json').read_bytes())
+        self.assertEqual(package['scripts'], {'start': 'node scripts/run.mjs'})
+        self.assertNotIn('devDependencies', package)
+        self.assertNotIn('devDependencies', lock['packages'][''])
+        self.assertEqual(package['dependencies'], lock['packages']['']['dependencies'])
+        self.assertNotIn('node_modules/prettier', lock['packages'])
+        for name, entry in source_lock['packages'].items():
+            if name and not entry.get('dev', False):
+                self.assertEqual(lock['packages'][name], entry)
         self.assertTrue(
             all(name.startswith('scripts/') for name in files if name.endswith(('.mjs', '.py')))
         )

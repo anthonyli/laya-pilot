@@ -1,6 +1,6 @@
 # 安装环境与配置
 
-仓库根目录和解压后的 skill 都包含同一份独立运行代码；可直接克隆仓库作为 skill，也可使用 ZIP。保留整个目录结构；依赖在用户机器上安装，ZIP 中不包含 node_modules、Python 虚拟环境、浏览器二进制或模型权重。
+仓库根目录和解压后的 skill 都包含同一份独立运行代码；可直接克隆仓库作为 skill，也可使用 ZIP。保留整个目录结构；依赖在用户机器上安装，ZIP 只包含 skill 运行所需文件，不含 demo、仓库开发文件、node_modules、Python 虚拟环境、浏览器二进制或模型权重。
 
 ## 默认 API 模式
 
@@ -51,7 +51,7 @@ node scripts/setup.mjs --check
 
 检查和运行共用配置解析：命令行优先，其次为 shell 环境变量、skill 的 `.env.local` 和默认值。模型名默认 `laya-decision`，可覆盖。skill 不再读取 JSON 配置或接受 `--config`。启动输出的 `CONFIG` 包括 skill 路径、版本摘要、配置文件、provider、模型和登录态文件状态；密钥仅显示是否设置。用 `node scripts/run.mjs --version` 核对版本与内容摘要。
 
-维护者可在仓库执行 `python3 scripts/package_skill.py --install-to /absolute/path/installed-skill` 显式升级指定副本；不指定安装目录时只生成 `dist/laya-pilot-skill.zip`，不改写仓库源码。升级只替换分发文件，保留 `.env.local`、`.auth`、依赖和模型。使用 `--check --install-to` 可比较分发文件内容，不改动安装副本。升级后执行 `node scripts/setup.mjs` 更新依赖。旧版 `runtime/` 布局的运行文件按旧 manifest 清理；没有 manifest 的旧文件保留但不再使用。旧 `runtime/node_modules/` 保留，新依赖安装到根目录的 `node_modules/`。配置、`.auth`、`.venv` 和模型位置不变，不要删除整个旧目录。
+升级时由维护者在源码仓库运行打包脚本，将分发文件更新到安装目录；保留 `.env.local`、`.auth`、依赖和模型，随后在安装目录执行 `node scripts/setup.mjs` 更新依赖。不要直接删除整个旧安装目录。打包及升级命令见 [项目仓库](https://github.com/anthonyli/laya-pilot#项目结构与维护)。
 
 ### API 协议
 
@@ -145,14 +145,8 @@ node scripts/run.mjs --excel '/absolute/path/cases.xlsx' \
 
 旧安装的 `config.local.json` 不再自动读取。迁移时只将 API、账号、密码和登录态设置放入 `.env.local`，保留已有非空凭据；Excel、URL、浏览器和输出选项改为任务参数。安装脚本不会自动清理已有配置，确认迁移后再删除旧 JSON 文件或 `.env.local` 中的任务变量。
 
-## 模板和 demo
+## 用例模板
 
 现有 Excel 回归直接读取用户用例，无须先生成或下载模板；至少要能识别步骤和预期结果表头。只有用户明确要求生成新用例时，生成器才使用内置 17 列结构；用户指定自定义生成模板时使用 `--template-excel /absolute/path/template.xlsx`。
 
-公开 demo 已包含在包内：
-
-```bash
-node scripts/demo-server.mjs
-```
-
-保持该进程运行，在另一个终端使用 `scripts/run.mjs` 测试 `http://127.0.0.1:8765/customers`。实际使用示例见 [workflows.md](workflows.md)。
+demo 页面、示例用例和启动脚本仅在 [源码仓库](https://github.com/anthonyli/laya-pilot#体验-demo) 中提供，不包含在 skill 交付包内。

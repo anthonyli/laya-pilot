@@ -155,7 +155,9 @@ python3 scripts/package_skill.py --check
 python3 scripts/package_skill.py --install-to /absolute/path/installed-skill
 ```
 
-Packaging creates `dist/laya-pilot-skill.zip` on demand; generated artifacts do not need to be committed. `--check` compares an existing ZIP with current sources. Upgrades preserve `.env.local`, `.auth`, dependencies, and models. Afterwards, run `node scripts/setup.mjs` in the installation directory to refresh dependencies. See [setup](references/setup.md) for migration details from older layouts.
+The delivery package contains only `SKILL.md`, runtime scripts, usage references, the configuration template, runtime dependency manifests, and the license. It excludes the demo, tests, GitHub configuration, READMEs, development tools, and the packaging script, as well as local configuration, authentication state, installed dependencies, and model weights. Its npm manifests retain only runtime dependencies and the start command; repository sources remain unchanged.
+
+Packaging creates `dist/laya-pilot-skill.zip` on demand. Git ignores `dist/`; do not commit delivery artifacts. Give recipients the complete extracted `laya-pilot/` directory and follow the installation steps above. `--check` compares an existing ZIP with current sources. Upgrades preserve `.env.local`, `.auth`, dependencies, and models. Afterwards, run `node scripts/setup.mjs` in the installation directory to refresh dependencies. Upgrades remove files listed in the previous manifest that are no longer distributed, including old demo files. Legacy files without a manifest are not automatically removed.
 
 For development, install dependencies with `npm ci`, then run `npm test`, `npm run test:browser`, and `npm run format:check`; formatting checks require `uv`. Python tests and additional verification steps are in the [runtime guide](docs/local-runtime.md).
 

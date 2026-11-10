@@ -23,8 +23,21 @@ RESOURCE_FILES = {
     'scripts/setup.mjs',
     'scripts/runner.mjs',
     'scripts/worker.py',
-    'scripts/demo-server.mjs',
 }
+
+
+def runtime_package_files(files):
+    """Keep locked runtime dependencies without repository-only commands or dev tools."""
+    package = json.loads(files['package.json'])
+    package.pop('devDependencies', None)
+    package['scripts'] = {'start': 'node scripts/run.mjs'}
+    lock = json.loads(files['package-lock.json'])
+    lock['packages'][''].pop('devDependencies', None)
+    lock['packages'] = {
+        name: entry for name, entry in lock['packages'].items() if not entry.get('dev', False)
+    }
+    for name, value in [('package.json', package), ('package-lock.json', lock)]:
+        files[name] = (json.dumps(value, indent=4) + '\n').encode()
 
 
 def distribution_files():
@@ -33,7 +46,6 @@ def distribution_files():
         names.add('agents/openai.yaml')
     for folder, suffixes in (
         ('scripts/lib', {'.mjs', '.py'}),
-        ('examples', {'.html', '.xlsx'}),
         ('references', {'.md'}),
     ):
         names.update(
@@ -42,6 +54,7 @@ def distribution_files():
             if source.is_file() and not source.name.startswith('.') and source.suffix in suffixes
         )
     files = {name: (ROOT / name).read_bytes() for name in sorted(names)}
+    runtime_package_files(files)
     hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
     manifest = {
         'schemaVersion': 1,
