@@ -604,7 +604,8 @@ export class Engine {
                 status: '未验证',
                 reason: '当前断言语法无法完整解释；未用Laya评分代替结果证明',
             };
-        if (spec.scope && !['visible', 'absent'].includes(spec.kind))
+        // Button 「弹窗」is a container scope resolved below, not a tab name to activate.
+        if (spec.scope && !['visible', 'absent', 'controlVisible'].includes(spec.kind))
             await this.showArea(spec.scope);
         let actual,
             passed = false;
@@ -635,7 +636,23 @@ export class Engine {
             passed = actual.some((s) => s.includes(spec.target));
         } else if (spec.kind === 'controlVisible') {
             // Action candidates can have inferred roles; use accessibility semantics for assertions.
-            const buttons = page
+            // An explicit dialog scope uses the same unique visible dialog as text assertions.
+            let root = page;
+            if (spec.scope === '弹窗') {
+                root = page
+                    .locator('dialog[open],[role="dialog"],.ant-drawer-open .ant-drawer-content')
+                    .filter({ visible: true });
+                const count = await root.count();
+                if (count !== 1)
+                    return {
+                        text,
+                        status: '未验证',
+                        kind: spec.kind,
+                        scope: spec.scope,
+                        reason: `无法唯一确定${spec.scope}范围（找到 ${count} 个）`,
+                    };
+            }
+            const buttons = root
                 .getByRole('button', { name: spec.target, exact: true })
                 .filter({ visible: true });
             const count = await buttons.count();
