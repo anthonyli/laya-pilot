@@ -195,7 +195,11 @@ test('ordinary Excel CLI report scopes dialog button assertions', { timeout: 120
             '--out',
             output,
         ]);
-        const summary = JSON.parse(await fs.readFile(path.join(output, 'results.json'), 'utf8'));
+        const summary = JSON.parse(
+            await fs.readFile(path.join(output, 'results.json'), 'utf8').catch((error) => {
+                throw new Error(`${error.message}\n${stdout}\n${stderr}`);
+            }),
+        );
         const inspection = JSON.parse(
             await fs.readFile(path.join(output, 'excel-inspection.json'), 'utf8'),
         );
@@ -259,6 +263,15 @@ function runCli(output, args) {
         if (key.startsWith('LAYA_') || key.startsWith('TEST_') || key.startsWith('BROWSER_'))
             delete env[key];
     }
+    // Empty values prevent .env.local from reintroducing real login settings.
+    Object.assign(env, {
+        TEST_USER: '',
+        TEST_PASSWORD: '',
+        TEST_AUTH_STATE: '',
+        TEST_AUTH_CHECK: '',
+        TEST_AUTH_SESSION_STORAGE: 'false',
+        LAYA_API_KEY: '',
+    });
     env.LAYA_PROVIDER = 'local';
     env.BROWSER_PROVIDER = 'playwright';
     env.BROWSER_CHANNEL = '';
