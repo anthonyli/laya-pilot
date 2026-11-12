@@ -30,14 +30,17 @@ function countRowsInTable(table) {
     if (table.shadowRoot) return uncountable();
     const native = table.tagName === 'TABLE';
     if (!native) {
-        for (const element of table.querySelectorAll('*')) {
+        for (const element of [table, ...table.querySelectorAll('*')]) {
             if (!visible(element) || element.closest('[role="row"]')) continue;
+            if (element.shadowRoot) return uncountable();
             const role = element.getAttribute('role');
-            if (role === 'row' || role === 'rowgroup' || role === 'caption') continue;
+            if (element.closest('[role="caption"]')) continue;
             const looseText = [...element.childNodes].some(
                 (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim(),
             );
-            if (looseText || role || !element.querySelector('[role="row"]')) return uncountable();
+            if (looseText) return uncountable();
+            if (element === table || role === 'rowgroup') continue;
+            if (role || !element.querySelector('[role="row"]')) return uncountable();
         }
     }
     const rows = [...table.querySelectorAll(native ? 'tbody tr' : '[role="row"]')].filter(visible);

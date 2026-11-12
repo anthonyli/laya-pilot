@@ -103,6 +103,10 @@ test('rowcount counts ARIA data rows and refuses structures it cannot count', as
             ['列表记录数为1', '失败', 0],
         ]);
         for (const html of [
+            `<div role="table" aria-label="客户">客户 A</div>`,
+            `<div role="table" aria-label="客户"><div role="rowgroup">客户 A</div></div>`,
+            `<div role="table" aria-label="客户">客户 A<div role="row"><span role="cell">B</span></div></div>`,
+            `<div role="table" aria-label="客户"><div role="rowgroup">客户 A<div role="row"><span role="cell">B</span></div></div></div>`,
             `<div role="table" aria-label="客户"><div class="row"><span>A</span></div></div>`,
             `<div role="table" aria-label="客户"><div role="row"><span>A</span></div></div>`,
         ]) {
@@ -114,6 +118,18 @@ test('rowcount counts ARIA data rows and refuses structures it cannot count', as
                 assert.match(result.reason, /不能把未知结构当成0行/);
             }
         }
+        await expectCount(
+            engine,
+            '<div role="table"><div role="caption"><span>客户列表</span></div><div role="rowgroup"></div></div>',
+            [['表格记录数为0', '通过', 0]],
+        );
+        await engine.page.setContent('<div role="table"><div id="host"></div></div>');
+        await page.locator('#host').evaluate((host) => {
+            host.attachShadow({ mode: 'open' }).innerHTML = '<p>客户 A</p>';
+        });
+        const shadow = await engine.verify('表格记录数为0');
+        assert.equal(shadow.status, '未验证');
+        assert.equal(shadow.actual, undefined);
         await engine.page.setContent(
             '<table><tbody><tr><td>A</td></tr></tbody></table><table><tbody><tr><td>B</td></tr></tbody></table>',
         );
