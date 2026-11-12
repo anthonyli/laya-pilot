@@ -205,8 +205,14 @@ export function expectation(text) {
     if ((m = text.match(/^[「“"](.+)[」”"]按钮(?:置灰不可点击|置灰|不可点击|不可用)$/)))
         return { kind: 'disabled', target: m[1] };
     if ((m = text.match(/^悬浮提示[「“"](.+)[」”"]$/))) return { kind: 'tooltip', target: m[1] };
-    if ((m = text.match(/^(?:页面|弹窗)?(?:展示|显示)[「“"](.+)[」”"]按钮$/)))
-        return { kind: 'controlVisible', target: m[1], role: 'button' };
+    if ((m = text.match(/^(页面|弹窗)?(?:展示|显示)[「“"](.+)[」”"]按钮$/)))
+        return {
+            kind: 'controlVisible',
+            target: m[2],
+            role: 'button',
+            // 「页面」keeps the existing whole-page search. Only 「弹窗」is a container scope.
+            ...(m[1] === '弹窗' ? { scope: '弹窗' } : {}),
+        };
     if ((m = text.match(/^(?:右侧)?弹出(.+?)(?:弹窗|Modal|Drawer|抽屉)$/i)))
         return { kind: 'dialog', target: m[1] };
     if ((m = text.match(/^名称列固定在左侧，操作列固定在右侧$/)))

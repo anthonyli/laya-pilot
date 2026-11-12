@@ -8,6 +8,76 @@ import { waitForReady, readTables } from './readiness.mjs';
 import { expandStep, semanticStep, scopeNames, approvalOperation } from './planner.mjs';
 const writeName =
     /(?:删除|移除|保存|提交|新增|创建|修改|编辑|上线|下线|授权|发布|导入|发送|支付|购买|确定|确认|应用|delete|remove|save|submit|create|edit|publish|send|pay|buy|import|confirm|apply)/i;
+
+// Shared by the wait and the final assertion. Native tables use tbody rows;
+// ARIA tables accepted by getByRole('table') use role=row. Header rows are not
+// records. A structure that does not expose those rows is unverified — never 0.
+function countRowsInTable(table) {
+    const visible = (element) => {
+        const box = element.getBoundingClientRect(),
+            style = getComputedStyle(element);
+        return (
+            box.width > 0 &&
+            box.height > 0 &&
+            style.visibility !== 'hidden' &&
+            style.display !== 'none'
+        );
+    };
+    const uncountable = () => ({
+        countable: false,
+        reason: '表格结构无法按数据行计数，不能把未知结构当成0行',
+    });
+    if (table.shadowRoot) return uncountable();
+    const native = table.tagName === 'TABLE';
+    if (!native) {
+        for (const element of [table, ...table.querySelectorAll('*')]) {
+            if (!visible(element) || element.closest('[role="row"]')) continue;
+            if (element.shadowRoot) return uncountable();
+            const role = element.getAttribute('role');
+            if (element.closest('[role="caption"]')) continue;
+            const looseText = [...element.childNodes].some(
+                (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim(),
+            );
+            if (looseText) return uncountable();
+            if (element === table || role === 'rowgroup') continue;
+            if (role || !element.querySelector('[role="row"]')) return uncountable();
+        }
+    }
+    const rows = [...table.querySelectorAll(native ? 'tbody tr' : '[role="row"]')].filter(visible);
+    const ownRows = rows.filter((row) => row.closest('table,[role="table"]') === table);
+    if (rows.length > 0 && ownRows.length === 0) return uncountable();
+    let count = 0;
+    for (const row of ownRows) {
+        const belongs = (selector) =>
+            [...row.querySelectorAll(selector)].some(
+                (element) => element.closest('tr,[role="row"]') === row,
+            );
+        if (belongs('td,[role="cell"],[role="gridcell"]')) {
+            count += 1;
+            continue;
+        }
+        if (belongs('th,[role="columnheader"],[role="rowheader"]')) continue;
+        if (!native) return uncountable();
+    }
+    return { countable: true, count };
+}
+
+async function readVisibleRowCount(page, expected, timeout) {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+        const tables = page.getByRole('table').filter({ visible: true });
+        if ((await tables.count()) !== 1)
+            return {
+                countable: false,
+                reason: '存在多个表格，需要写明目标表格，不能猜测行数',
+            };
+        const counted = await tables.evaluate(countRowsInTable);
+        if (!counted.countable || counted.count === expected || Date.now() >= deadline)
+            return counted;
+        await page.waitForTimeout(Math.min(50, Math.max(1, deadline - Date.now())));
+    }
+}
+
 export class Engine {
     constructor(page, laya, config) {
         this.page = page;
@@ -537,7 +607,8 @@ export class Engine {
                 status: '未验证',
                 reason: '当前断言语法无法完整解释；未用Laya评分代替结果证明',
             };
-        if (spec.scope && !['visible', 'absent'].includes(spec.kind))
+        // Button 「弹窗」is a container scope resolved below, not a tab name to activate.
+        if (spec.scope && !['visible', 'absent', 'controlVisible'].includes(spec.kind))
             await this.showArea(spec.scope);
         let actual,
             passed = false;
@@ -568,7 +639,23 @@ export class Engine {
             passed = actual.some((s) => s.includes(spec.target));
         } else if (spec.kind === 'controlVisible') {
             // Action candidates can have inferred roles; use accessibility semantics for assertions.
-            const buttons = page
+            // An explicit dialog scope uses the same unique visible dialog as text assertions.
+            let root = page;
+            if (spec.scope === '弹窗') {
+                root = page
+                    .locator('dialog[open],[role="dialog"],.ant-drawer-open .ant-drawer-content')
+                    .filter({ visible: true });
+                const count = await root.count();
+                if (count !== 1)
+                    return {
+                        text,
+                        status: '未验证',
+                        kind: spec.kind,
+                        scope: spec.scope,
+                        reason: `无法唯一确定${spec.scope}范围（找到 ${count} 个）`,
+                    };
+            }
+            const buttons = root
                 .getByRole('button', { name: spec.target, exact: true })
                 .filter({ visible: true });
             const count = await buttons.count();
@@ -674,40 +761,13 @@ export class Engine {
                 .allTextContents();
             passed = spec.targets.every((t) => actual.some((a) => a.trim() === t));
         } else if (spec.kind === 'rowcount') {
-            const tables = page.getByRole('table').filter({ visible: true });
-            if ((await tables.count()) !== 1)
-                return {
-                    text,
-                    status: '未验证',
-                    reason: '存在多个表格，需要写明目标表格，不能猜测行数',
-                };
-            await page
-                .waitForFunction(
-                    (expected) => {
-                        const visible = (e) => {
-                            const r = e.getBoundingClientRect(),
-                                s = getComputedStyle(e);
-                            return (
-                                r.width > 0 &&
-                                r.height > 0 &&
-                                s.visibility !== 'hidden' &&
-                                s.display !== 'none'
-                            );
-                        };
-                        const all = [...document.querySelectorAll('table,[role="table"]')].filter(
-                            visible,
-                        );
-                        return (
-                            all.length === 1 &&
-                            [...all[0].querySelectorAll('tbody tr')].filter(visible).length ===
-                                expected
-                        );
-                    },
-                    spec.value,
-                    { timeout: this.config.assertTimeout },
-                )
-                .catch(() => {});
-            actual = await tables.locator('tbody tr').filter({ visible: true }).count();
+            const timeout = Number.isFinite(this.config.assertTimeout)
+                ? this.config.assertTimeout
+                : 4000;
+            const reading = await readVisibleRowCount(page, spec.value, timeout);
+            if (!reading.countable)
+                return { text, status: '未验证', kind: spec.kind, reason: reading.reason };
+            actual = reading.count;
             passed = actual === spec.value;
         } else if (spec.kind === 'url') {
             actual = page.url();

@@ -42,6 +42,37 @@ test('Negative, selected and count assertions are distinct', () => {
     assert.equal(lines('1、点击“新增”\n2、查看页面').length, 2);
 });
 
+test('dialog button assertions keep the dialog scope and page assertions stay page-wide', () => {
+    assert.deepEqual(expectation('弹窗显示“保存”按钮'), {
+        kind: 'controlVisible',
+        target: '保存',
+        role: 'button',
+        scope: '弹窗',
+    });
+    assert.deepEqual(expectation('弹窗展示「提交」按钮'), {
+        kind: 'controlVisible',
+        target: '提交',
+        role: 'button',
+        scope: '弹窗',
+    });
+    assert.deepEqual(expectation('弹窗显示"Save"按钮'), {
+        kind: 'controlVisible',
+        target: 'Save',
+        role: 'button',
+        scope: '弹窗',
+    });
+    assert.deepEqual(expectation('页面显示「保存」按钮'), {
+        kind: 'controlVisible',
+        target: '保存',
+        role: 'button',
+    });
+    assert.deepEqual(expectation('显示「保存」按钮'), {
+        kind: 'controlVisible',
+        target: '保存',
+        role: 'button',
+    });
+});
+
 test('quoted semicolons stay in steps and expectations while outside separators split', () => {
     for (const [open, close] of [
         ['「', '」'],
