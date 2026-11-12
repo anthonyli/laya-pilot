@@ -29,12 +29,14 @@ STEP = '查看当前页面'
 EXPECTED = '页面显示“查询”按钮'
 
 
-def read_cases(headers, rows):
+def read_cases(headers, rows, merges=()):
     book = Workbook()
     sheet = book.active
     sheet.append(headers)
     for row in rows:
         sheet.append(row)
+    for cell_range in merges:
+        sheet.merge_cells(cell_range)
     with tempfile.TemporaryDirectory(prefix='laya-history-formula-') as directory:
         filename = Path(directory) / 'cases.xlsx'
         book.save(filename)
@@ -163,6 +165,7 @@ class HistoricalResultImportTests(unittest.TestCase):
                 case_row('fail'),
                 ['', '', '查看下一屏', EXPECTED, FORMULA],
             ],
+            merges=('A2:A3', 'B2:B3'),
         )
         self.assertEqual(len(cases), 1)
         self.assertEqual(cases[0]['import_error'], '')
@@ -175,9 +178,29 @@ class HistoricalResultImportTests(unittest.TestCase):
                 case_row('fail'),
                 ['', '', '=IF(1=1,"查看下一屏","点击删除")', EXPECTED, FORMULA],
             ],
+            merges=('A2:A3', 'B2:B3'),
         )
+        self.assertEqual(len(blocked), 1)
         self.assertEqual(blocked[0]['import_error'], '执行列含公式，需提供明确文本：C3')
         self.assertNotIn('E3', blocked[0]['import_error'])
+
+    def test_unmerged_blank_identity_keeps_formula_errors_on_its_own_case(self):
+        for step, expected_error in (
+            ('查看下一屏', ''),
+            ('=IF(1=1,"查看下一屏","点击删除")', '执行列含公式，需提供明确文本：C3'),
+        ):
+            with self.subTest(step=step):
+                cases = read_cases(
+                    HEADERS,
+                    [case_row('fail'), ['', '', step, EXPECTED, FORMULA]],
+                )
+                self.assertEqual([case['id'] for case in cases], ['001', 'Sheet-3'])
+                self.assertEqual(cases[0]['steps'], STEP)
+                self.assertEqual(cases[0]['import_error'], '')
+                self.assertEqual(cases[0]['source_result'], 'fail')
+                self.assertEqual(cases[1]['steps'], step)
+                self.assertEqual(cases[1]['source_result'], FORMULA)
+                self.assertEqual(cases[1]['import_error'], expected_error)
 
 
 class QueryPage(BaseHTTPRequestHandler):

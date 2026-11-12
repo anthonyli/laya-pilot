@@ -27,12 +27,53 @@ def normalize(s):
     return re.sub(r'[\s_\-]', '', str(s or '')).lower()
 
 
+def _merge_bounds(filename):
+    """Return merged ranges as (min_col, min_row, max_col, max_row), keyed by sheet."""
+    from openpyxl import load_workbook
+    from openpyxl.utils import range_boundaries
+
+    book = load_workbook(filename, data_only=False)
+    try:
+        return {
+            sheet.title: [
+                range_boundaries(str(cell_range)) for cell_range in sheet.merged_cells.ranges
+            ]
+            for sheet in book.worksheets
+        }
+    finally:
+        book.close()
+
+
+def _merged_with_case(bounds, row, columns, anchor_row):
+    """True when an identity column on this row shares a merge with the previous case."""
+    for column in columns:
+        if column is None:
+            continue
+        excel_column = column + 1
+        for min_col, min_row, max_col, max_row in bounds:
+            if (
+                min_col <= excel_column <= max_col
+                and min_row <= anchor_row <= max_row
+                and min_row < row <= max_row
+            ):
+                return True
+    return False
+
+
 def read_excel(filename):
     from openpyxl import load_workbook
 
+    merges = _merge_bounds(filename)
     wb = load_workbook(filename, read_only=True, data_only=False)
     cases = []
     warnings = []
+    try:
+        return _read_sheets(wb, cases, warnings, merges)
+    finally:
+        wb.close()
+
+
+def _read_sheets(wb, cases, warnings, merges):
     for sheet in wb:
         mapping = None
         for rowno, row in enumerate(sheet.iter_rows(), 1):
@@ -81,16 +122,46 @@ def read_excel(filename):
                 if formulas
                 else '',
             }
-            # Common merged-ID layout: blank ID/title rows continue the preceding case.
-            if not get('id') and not get('title') and cases and cases[-1]['sheet'] == sheet.title:
+            # Id and title are optional, so a blank pair is its own case. Continue only
+            # when an id or title cell is merged into the previous case on this sheet.
+            anchor = cases[-1] if cases and cases[-1]['sheet'] == sheet.title else None
+            blank_identity = not get('id') and not get('title')
+            linked = bool(
+                anchor
+                and _merged_with_case(
+                    merges.get(sheet.title, ()),
+                    rowno,
+                    (mapping.get('id'), mapping.get('title')),
+                    anchor['row'],
+                )
+            )
+            if linked and blank_identity:
                 for key in ('steps', 'expected', 'preconditions', 'data', 'import_error'):
                     if item[key]:
                         cases[-1][key] += ('\n' if cases[-1][key] else '') + item[key]
             else:
+                if linked:
+                    warnings.append(
+                        f'{sheet.title}:第{rowno}行的编号或名称单元格与第{anchor["row"]}行合并，'
+                        '但本行又填写了编号或名称，无法确定是否为同一条用例，已按独立用例保留'
+                    )
+                elif (
+                    anchor
+                    and anchor.get('_supplied_identity')
+                    and blank_identity
+                    and (mapping.get('id') is not None or mapping.get('title') is not None)
+                ):
+                    warnings.append(
+                        f'{sheet.title}:第{rowno}行没有用例编号和用例名称，'
+                        '且编号或名称单元格未与上一条用例合并，'
+                        '无法判断它是独立用例还是续行，已按独立用例保留'
+                    )
+                item['_supplied_identity'] = not blank_identity
                 cases.append(item)
         if mapping is None:
             warnings.append(f'{sheet.title}:前15行找不到步骤与预期结果表头，未读取')
-    wb.close()
+    for case in cases:
+        case.pop('_supplied_identity', None)
     return {'cases': cases, 'warnings': warnings}
 
 
