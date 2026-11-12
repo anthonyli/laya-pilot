@@ -61,10 +61,15 @@ def read_excel(filename):
             cid = get('id') or f'{sheet.title}-{rowno}'
             if cid.isdigit():
                 cid = cid.zfill(3)
+            # source_result records a previous run. It is not an input to this
+            # execution, so a formula there is kept as raw text and does not block.
             formulas = [
-                row[i].coordinate
-                for i in mapping.values()
-                if i is not None and i < len(row) and row[i].data_type == 'f'
+                row[index].coordinate
+                for key, index in mapping.items()
+                if key != 'source_result'
+                and index is not None
+                and index < len(row)
+                and row[index].data_type == 'f'
             ]
             item = {
                 **{key: get(key) for key in ALIASES},
