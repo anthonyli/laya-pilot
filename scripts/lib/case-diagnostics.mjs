@@ -30,7 +30,7 @@ export function compileExpectation(source) {
         if (spec.kind === 'unsupported') diagnostic = assertionDiagnostic(text);
         else if (
             parts.length > 1 &&
-            /^(?:显示|展示|包含|出现|不显示|不展示|不存在|不包含)/.test(text)
+            /^(?:显示|展示|包含|出现|不显示|不展示|不存在|不包含|shows\b|contains\b)/i.test(text)
         )
             diagnostic = {
                 code: 'missing-assertion-scope',

@@ -444,8 +444,12 @@ export class Engine {
             );
         }
         const check = await this.verify(p);
-        if (check.status !== '通过')
-            throw new Halt('前置条件未验证', '未能验证前提：' + p + '；' + check.reason);
+        if (check.status !== '通过') {
+            const error = new Halt('前置条件未验证', '未能验证前提：' + p + '；' + check.reason);
+            error.pendingEvidence =
+                check.status === '未验证' && ['unsupported', 'conjunction'].includes(check.kind);
+            throw error;
+        }
     }
     async step(text) {
         const diagnosis = stepDiagnostic(text);
@@ -650,6 +654,7 @@ export class Engine {
         if (spec.kind === 'unsupported')
             return {
                 text,
+                kind: spec.kind,
                 status: '未验证',
                 reason:
                     assertionDiagnostic(text).message + '；' + assertionDiagnostic(text).suggestion,
@@ -923,7 +928,7 @@ export class Engine {
                 } catch (e) {
                     if (
                         e.category !== '前置条件未验证' ||
-                        !/(?:尚不能证明|语法无法完整解释)/.test(e.message)
+                        !(e.pendingEvidence || /(?:尚不能证明|语法无法完整解释)/.test(e.message))
                     )
                         throw e;
                     this.pendingPreconditions.push(p);

@@ -158,3 +158,60 @@ function run(command, args, options = {}) {
         child.on('close', (code) => resolve({ code, stdout, stderr }));
     });
 }
+
+test('unverifiable prerequisites remain pending while disproven prerequisites still block', async () => {
+    const browser = await chromium.launch({ headless: true });
+    const out = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-prerequisite-'));
+    try {
+        await fs.mkdir(path.join(out, 'evidence'));
+        const page = await browser.newPage();
+        const url = 'http://prerequisite.test/';
+        await page.route(url, (route) =>
+            route.fulfill({
+                contentType: 'text/html; charset=utf-8',
+                body: '<h1>列表</h1><button>搜索</button>',
+            }),
+        );
+        const engine = new Engine(
+            page,
+            {},
+            {
+                out,
+                url,
+                origins: [new URL(url).origin],
+                data: {},
+                runId: 'test',
+                maxSteps: 10,
+                assertTimeout: 50,
+                pageTimeout: 2000,
+                delay: 0,
+            },
+        );
+        const base = {
+            sheet: '用例',
+            row: 2,
+            id: '001',
+            key: '用例:2',
+            title: '前提检查',
+            steps: '观察页面',
+            expected: '页面显示“搜索”按钮',
+            data: '',
+        };
+        for (const preconditions of ['客户数据准备正确', '页面显示“搜索”按钮且客户数据准备正确']) {
+            const result = await engine.runCase({ ...base, preconditions });
+            assert.equal(result.status, '部分验证', result.reason);
+            assert.equal(result.precondition_checks[0].status, '待补证');
+            assert.ok(result.evidence.some((e) => e.phase === 'step' && e.status === '已完成'));
+            assert.ok(
+                result.assertions.some((a) => a.text.startsWith('前提：') && a.status === '未验证'),
+            );
+        }
+        const blocked = await engine.runCase({ ...base, preconditions: '页面显示“不存在”按钮' });
+        assert.equal(blocked.status, '跳过（未完成）');
+        assert.equal(blocked.category, '前置条件未验证');
+        assert.equal(blocked.evidence.length, 0);
+    } finally {
+        await browser.close();
+        await fs.rm(out, { recursive: true, force: true });
+    }
+});

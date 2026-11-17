@@ -54,4 +54,8 @@ test('conjunction compiler preserves quoted content and refuses to invent scope 
         'missing-assertion-scope',
     );
     assert.equal(compileExpectation('表格表头包含：名称、状态').length, 1);
+    assert.equal(
+        compileExpectation('page shows "Search" and contains "Delete"')[1].diagnostic.code,
+        'missing-assertion-scope',
+    );
 });
