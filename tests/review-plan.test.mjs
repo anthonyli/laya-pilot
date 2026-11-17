@@ -142,6 +142,18 @@ test(
             );
             assert.equal(overridden.code, 1);
             assert.match(overridden.stderr, /覆盖已审核范围/);
+            const rebound = await run(
+                [
+                    ...base,
+                    '--approved-hash',
+                    metadata.sha256,
+                    '--control-bindings',
+                    'bindings.json',
+                ],
+                directory,
+            );
+            assert.equal(rebound.code, 1);
+            assert.match(rebound.stderr, /覆盖已审核范围/);
             assert.equal(hits, 0);
             const inspection = await run([...base, '--inspect'], directory);
             assert.equal(inspection.code, 0, inspection.stderr);

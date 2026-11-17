@@ -147,6 +147,7 @@ export async function loadReviewedPlan(args, inspect = false) {
         '--cases',
         '--data',
         '--labels',
+        '--control-bindings',
         '--operations',
         '--allow-write',
         '--read-only',
