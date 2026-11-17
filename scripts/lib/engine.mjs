@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { safeText } from './diagnostics.mjs';
+import { safeText, safeUrl } from './diagnostics.mjs';
 import { Halt, expectation, lines, variables, parseData, norm, quoted } from './language.mjs';
 import { observe, target, settle, assertionTarget, discoverRowLabels } from './dom.mjs';
 import { waitForReady, readTables } from './readiness.mjs';
@@ -818,7 +818,32 @@ export class Engine {
             category: '',
             actions: [],
             assertions: [],
+            evidence: [],
             started_at: new Date().toISOString(),
+        };
+        const identity = JSON.stringify([c.sheet ?? '', c.row ?? '', c.id ?? '']);
+        const digest = createHash('sha256').update(identity).digest('hex');
+        const occurrence = (this.evidenceOccurrences.get(digest) || 0) + 1;
+        this.evidenceOccurrences.set(digest, occurrence);
+        const stem = `case-${digest}-${occurrence}`;
+        const capture = async (details) => {
+            const evidence = {
+                sequence: result.evidence.length + 1,
+                ...details,
+                at: new Date().toISOString(),
+            };
+            result.evidence.push(evidence);
+            const screenshot = `evidence/${stem}-${evidence.sequence}.png`;
+            try {
+                evidence.url = safeUrl(this.page.url());
+                const file = path.join(this.config.out, screenshot);
+                await this.page.screenshot({ path: file, timeout: 5000 });
+                if (!(await fs.stat(file)).size) throw Error('截图文件为空');
+                evidence.screenshot = screenshot;
+            } catch (error) {
+                evidence.screenshot_error = `截图采集失败：${safeText(error?.message || String(error))}`;
+            }
+            return evidence.sequence;
         };
         try {
             if (c.import_error) throw new Halt('Excel内容不明确', c.import_error);
@@ -878,20 +903,48 @@ export class Engine {
                     await this.showArea(area);
                     console.log('  用例范围：' + area);
                 }
-                for (const text of steps) await this.step(text);
-                this.phase = 'assertion';
-                for (const text of expected) {
+                for (const [index, text] of steps.entries()) {
+                    const firstEvent = this.events.length;
+                    let status = '已完成';
                     try {
-                        const assertion = await this.verify(text);
-                        result.assertions.push({ ...assertion, scope: assertion.scope ?? area });
-                    } catch (e) {
-                        if (e.category === '模型API错误') throw e;
-                        result.assertions.push({
+                        await this.step(text);
+                    } catch (error) {
+                        status = '未完成';
+                        throw error;
+                    } finally {
+                        const sequence = await capture({
+                            phase: 'step',
+                            index: index + 1,
                             text,
                             scope: area,
+                            status,
+                        });
+                        for (const event of this.events.slice(firstEvent))
+                            event.evidence_sequence = sequence;
+                    }
+                }
+                this.phase = 'assertion';
+                for (const [index, text] of expected.entries()) {
+                    let assertion;
+                    try {
+                        assertion = await this.verify(text);
+                    } catch (e) {
+                        assertion = {
+                            text,
                             status: '未验证',
                             reason: e.message,
+                        };
+                        if (e.category === '模型API错误') throw e;
+                    } finally {
+                        assertion = { ...assertion, scope: assertion?.scope ?? area };
+                        assertion.evidence_sequence = await capture({
+                            phase: 'assertion',
+                            index: index + 1,
+                            text,
+                            scope: assertion.scope,
+                            status: assertion.status,
                         });
+                        result.assertions.push(assertion);
                     }
                 }
             }
@@ -949,11 +1002,6 @@ export class Engine {
             result.category = '环境接口故障';
             result.reason += '；页面未就绪且捕获HTTP5xx，不能据此判定产品功能错误';
         }
-        const identity = JSON.stringify([c.sheet ?? '', c.row ?? '', c.id ?? '']);
-        const digest = createHash('sha256').update(identity).digest('hex');
-        const occurrence = (this.evidenceOccurrences.get(digest) || 0) + 1;
-        this.evidenceOccurrences.set(digest, occurrence);
-        const stem = `case-${digest}-${occurrence}`;
         if (touchedPage) {
             const screenshot = 'evidence/' + stem + '.png';
             try {
