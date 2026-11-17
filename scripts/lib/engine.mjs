@@ -5,6 +5,7 @@ import { safeText, safeUrl } from './diagnostics.mjs';
 import { Halt, expectation, lines, variables, parseData, norm, quoted } from './language.mjs';
 import { observe, target, settle, assertionTarget, discoverRowLabels } from './dom.mjs';
 import { waitForReady, readTables } from './readiness.mjs';
+import { configureControlBindings } from './control-bindings.mjs';
 import { expandStep, semanticStep, scopeNames, approvalOperation } from './planner.mjs';
 const writeName =
     /(?:删除|移除|保存|提交|新增|创建|修改|编辑|上线|下线|授权|发布|导入|发送|支付|购买|确定|确认|应用|delete|remove|save|submit|create|edit|publish|send|pay|buy|import|confirm|apply)/i;
@@ -83,6 +84,7 @@ export class Engine {
         this.page = page;
         this.laya = laya;
         this.config = config;
+        configureControlBindings(page, config.controlBindings);
         this.events = [];
         this.actions = 0;
         this.current = null;
@@ -1011,9 +1013,20 @@ export class Engine {
                 result.screenshot_error = `截图采集失败：${safeText(error?.message || String(error))}`;
             }
             const snap = await observe(this.page);
+            result.unidentified_controls = snap.unidentifiedControls;
+            result.control_binding_diagnostics = snap.bindingDiagnostics;
             await fs.writeFile(
                 path.join(this.config.out, 'evidence', stem + '-controls.json'),
-                JSON.stringify({ url: snap.url, controls: snap.controls }, null, 2),
+                JSON.stringify(
+                    {
+                        url: snap.url,
+                        controls: snap.controls,
+                        unidentifiedControls: snap.unidentifiedControls,
+                        bindingDiagnostics: snap.bindingDiagnostics,
+                    },
+                    null,
+                    2,
+                ),
             );
         }
         return result;

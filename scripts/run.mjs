@@ -28,7 +28,7 @@ Configuration: the skill .env.local loads automatically; CLI options override it
 --provider local explicitly opts into local inference; setup.mjs --local-model installs and downloads weights.
 Options: --python PATH, --headless, --manual-login, --out DIR,
 --auth-state FILE --auth-check CSS, --read-only, --operations LIST,
---data FILE, --template-excel FILE, --allow-write (authorized writes for either Excel format).
+--data FILE, --control-bindings FILE (ordinary Excel only), --template-excel FILE, --allow-write (authorized writes for either Excel format).
 See references/setup.md and references/workflows.md for details.`);
         return;
     }

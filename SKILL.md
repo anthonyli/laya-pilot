@@ -82,4 +82,5 @@ node scripts/setup.mjs --check
 - 输出默认保存到用户当前工作目录下的新 `runs/laya-pilot/` 目录；生成文件使用新的 `generated-cases/laya-pilot-*.xlsx` 文件名。需要指定位置时用 `--out` 和 `--case-file`。
 - 读取本轮实际报告，分别说明通过、失败、不适用、阻断和未执行情况，提供实际存在的用例、结果表格、报告和失败证据路径。Excel 解析成功、只读检查成功与完整业务测试成功要明确区分。
 - 如有 `pendingWrite` 或 `retainedRecord`，先核对 `checkpoint.json` 与证据再决定后续操作，不盲目重复保存、删除或清理。进度文件不支持自动断点续跑。
+- 无标签图标不能按位置猜测；先读取未识别控件诊断与截图，仅在有可核实语义时使用显式绑定，规则见 [references/control-bindings.md](references/control-bindings.md)。
 - API 失败时说明连接、响应或协议问题；本包调用 HTTPS Chat Completions 接口，模型必须返回本项目要求的候选决策 JSON，细节见安装说明。不会自动更换服务或模型。
