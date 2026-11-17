@@ -6,6 +6,12 @@ import { Halt, expectation, lines, variables, parseData, norm, quoted } from './
 import { observe, target, settle, assertionTarget, discoverRowLabels } from './dom.mjs';
 import { waitForReady, readTables } from './readiness.mjs';
 import { expandStep, semanticStep, scopeNames, approvalOperation } from './planner.mjs';
+import {
+    inspectCase,
+    compileExpectation,
+    stepDiagnostic,
+    assertionDiagnostic,
+} from './case-diagnostics.mjs';
 const writeName =
     /(?:删除|移除|保存|提交|新增|创建|修改|编辑|上线|下线|授权|发布|导入|发送|支付|购买|确定|确认|应用|delete|remove|save|submit|create|edit|publish|send|pay|buy|import|confirm|apply)/i;
 
@@ -438,10 +444,17 @@ export class Engine {
             );
         }
         const check = await this.verify(p);
-        if (check.status !== '通过')
-            throw new Halt('前置条件未验证', '未能验证前提：' + p + '；' + check.reason);
+        if (check.status !== '通过') {
+            const error = new Halt('前置条件未验证', '未能验证前提：' + p + '；' + check.reason);
+            error.pendingEvidence =
+                check.status === '未验证' && ['unsupported', 'conjunction'].includes(check.kind);
+            throw error;
+        }
     }
     async step(text) {
+        const diagnosis = stepDiagnostic(text);
+        if (diagnosis.status === 'needs-data')
+            throw new Halt('缺少测试数据', diagnosis.message + '；' + diagnosis.suggestion);
         const snap = await observe(this.page);
         let specs = expandStep(text, { controls: snap.controls, area: this.area });
         if (!specs.length)
@@ -599,13 +612,52 @@ export class Engine {
         return event;
     }
     async verify(text) {
+        const compiled = compileExpectation(text);
+        if (compiled.length > 1) {
+            const assertions = [];
+            for (const part of compiled) {
+                if (part.diagnostic)
+                    assertions.push({
+                        text: part.text,
+                        status: '未验证',
+                        reason: part.diagnostic.message + '；' + part.diagnostic.suggestion,
+                    });
+                else {
+                    try {
+                        assertions.push(await this.verify(part.text));
+                    } catch (error) {
+                        if (error.category === '模型API错误') throw error;
+                        assertions.push({
+                            text: part.text,
+                            status: '未验证',
+                            reason: error.message,
+                        });
+                    }
+                }
+            }
+            const status = assertions.some((a) => a.status === '失败')
+                ? '失败'
+                : assertions.some((a) => a.status !== '通过')
+                  ? '未验证'
+                  : '通过';
+            return {
+                text,
+                status,
+                kind: 'conjunction',
+                assertions,
+                compilation: compiled,
+                reason: assertions.map((a) => `${a.text}：${a.reason}`).join('；'),
+            };
+        }
         const spec = expectation(text),
             page = this.page;
         if (spec.kind === 'unsupported')
             return {
                 text,
+                kind: spec.kind,
                 status: '未验证',
-                reason: '当前断言语法无法完整解释；未用Laya评分代替结果证明',
+                reason:
+                    assertionDiagnostic(text).message + '；' + assertionDiagnostic(text).suggestion,
             };
         // Button 「弹窗」is a container scope resolved below, not a tab name to activate.
         if (spec.scope && !['visible', 'absent', 'controlVisible'].includes(spec.kind))
@@ -819,6 +871,7 @@ export class Engine {
             actions: [],
             assertions: [],
             evidence: [],
+            input_diagnostics: inspectCase(c, this.config.data, this.config.runId).diagnostics,
             started_at: new Date().toISOString(),
         };
         const identity = JSON.stringify([c.sheet ?? '', c.row ?? '', c.id ?? '']);
@@ -875,7 +928,7 @@ export class Engine {
                 } catch (e) {
                     if (
                         e.category !== '前置条件未验证' ||
-                        !/(?:尚不能证明|语法无法完整解释)/.test(e.message)
+                        !(e.pendingEvidence || /(?:尚不能证明|语法无法完整解释)/.test(e.message))
                     )
                         throw e;
                     this.pendingPreconditions.push(p);

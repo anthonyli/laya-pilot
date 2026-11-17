@@ -20,6 +20,7 @@ import {
 import { Engine } from './lib/engine.mjs';
 import { describe, expectation, lines } from './lib/language.mjs';
 import { settle } from './lib/dom.mjs';
+import { inspectCase, compileExpectation } from './lib/case-diagnostics.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
     args = process.argv.slice(2);
 const arg = (n, d) => {
@@ -163,6 +164,7 @@ async function report(results, laya, source, warnings) {
             '截图',
             '截图采集说明',
             '步骤与断言证据',
+            '用例可执行性诊断',
         ],
         ...results.map((r) => [
             r.sheet,
@@ -177,6 +179,7 @@ async function report(results, laya, source, warnings) {
             r.screenshot,
             r.screenshot_error,
             JSON.stringify(r.evidence || []),
+            JSON.stringify(r.input_diagnostics || []),
         ]),
     ];
     await fs.writeFile(
@@ -201,6 +204,13 @@ async function report(results, laya, source, warnings) {
         md += '|序号|阶段|原文|范围|状态|采集时间|截图|\n|---|---|---|---|---|---|---|\n';
         for (const e of r.evidence)
             md += `|${e.sequence}|${e.phase === 'step' ? '步骤' : '预期'} ${e.index}|${clean(e.text)}|${clean(e.scope ?? '')}|${clean(e.status)}|${clean(e.at)}|${e.screenshot ? `[截图](${e.screenshot})` : clean(e.screenshot_error || '未采集')}|\n`;
+    }
+    md += '\n## 用例可执行性诊断\n\n诊断保留原业务意图；语法可解释不代表页面或测试通过。\n';
+    for (const r of results) {
+        for (const d of r.input_diagnostics || []) {
+            if (d.code === 'needs-live-target') continue;
+            md += `\n- ${clean(r.sheet)} 第${r.row}行 / ${clean(r.id)} / ${d.field} ${d.index}${d.clause ? ' 子句' + d.clause : ''}：${clean(d.text ?? '')}；${clean(d.message)}；${clean(d.suggestion)}\n`;
+        }
     }
     await fs.writeFile(path.join(config.out, '报告.md'), md);
     await fs.writeFile(
@@ -379,7 +389,15 @@ async function main() {
         title: c.title,
         preconditions: c.preconditions,
         steps: lines(c.steps).map((text) => ({ text, ...describe(text) })),
-        expected: lines(c.expected).map((text) => ({ text, ...expectation(text) })),
+        expected: lines(c.expected).map((text) => {
+            const assertions = compileExpectation(text);
+            return assertions.length > 1
+                ? { text, kind: 'conjunction', assertions }
+                : { text, ...expectation(text) };
+        }),
+        sheet: c.sheet,
+        row: c.row,
+        ...inspectCase(c, config.data),
     }));
     await fs.writeFile(
         path.join(config.out, 'excel-inspection.json'),

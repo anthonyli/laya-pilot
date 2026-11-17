@@ -20,7 +20,7 @@ const source = (url) => ({
             id: '001',
             title: '查看入口',
             steps: '观察页面',
-            expected: '页面显示“搜索”按钮',
+            expected: '页面显示“搜索”按钮且页面显示“搜索”',
             pending: [],
         },
     ],
@@ -206,6 +206,8 @@ test(
             assert.equal(result.reviewPlan.url, url);
             assert.equal(result.reviewPlan.allowWrite, false);
             assert.equal(result.results[0].status, '通过');
+            assert.equal(result.results[0].assertions[0].kind, 'conjunction');
+            assert.equal(result.results[0].assertions[0].assertions.length, 2);
             assert.equal(result.results[0].expected, source(url).cases[0].expected);
             assert.deepEqual(await fs.readFile(file), original);
             const approval = JSON.parse(
