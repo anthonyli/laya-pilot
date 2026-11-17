@@ -37,7 +37,7 @@ description: Run browser regression tests from user-provided Excel test cases fo
 ## 主流程：已有用例回归
 
 1. 从当前任务获取 Excel 和目标地址，通过 `--excel`、`--url` 传入；登录方式可复用 `.env.local` 中的配置。用户要求回归却未提供用例时，先补齐用例文件；没有模板时提供内置模板，不自动改成从页面生成用例。
-2. 使用 `scripts/run.mjs --excel ... --inspect` 自动识别工作簿并检查解析、计划校验、用例数与导入警告。默认包含全部读取到的用例；未识别的工作表或步骤要明确报告，不能算作已覆盖。
+2. 使用 `scripts/run.mjs --excel ... --inspect` 自动识别工作簿并检查解析、计划校验、用例数与导入警告。普通 Excel 的 `diagnostics` 和 `compilation` 分别指出缺失数据、待页面定位、缺少业务判定依据及原预期到子断言的映射；按原行和用例说明需补充的信息，不因此删选用例或把业务预期改成控件可见。默认包含全部读取到的用例；未识别的工作表或步骤要明确报告，不能算作已覆盖。
 3. 执行这些现有用例；常用无头回归命令为 `scripts/run.mjs --excel ... --url ... --headless`。按原用例保留数据、步骤和预期；只有用户明确要求修订时才修改原用例。登录前检查已配置的 `authState` 和登录后唯一标记 `authCheck`，优先复用并验证已有登录态；失效后再登录。
 4. 读取本轮报告，按用例给出结果、失败步骤与证据路径。普通用例输出 JSON、CSV、Markdown；结构化用例输出独立结果 Excel、JSON、Markdown。浏览器证据按实际产物提供，原始工作簿保持不变。
 
