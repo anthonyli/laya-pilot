@@ -16,6 +16,9 @@ test('sibling labels name input fields without renaming save/cancel buttons', as
     const node = (tag, text, previous = null) => ({
         tagName: tag,
         innerText: text,
+        outerHTML: `<${tag}>${text}</${tag}>`,
+        cloneNode: () => node(tag, text),
+        getRootNode: () => document,
         previousElementSibling: previous,
         parentElement: null,
         getAttribute: () => null,
@@ -23,6 +26,7 @@ test('sibling labels name input fields without renaming save/cancel buttons', as
         setAttribute: () => {},
         closest: () => null,
         querySelector: () => null,
+        querySelectorAll: () => [],
         matches: () => false,
         getBoundingClientRect: () => ({ width: 100, height: 30 }),
         classList: { contains: () => false },
@@ -41,6 +45,7 @@ test('sibling labels name input fields without renaming save/cancel buttons', as
         getElementById: () => null,
     };
     const frame = {
+        parentFrame: () => null,
         evaluate: async (fn, args) =>
             vm.runInNewContext(`(${fn.toString()})(args)`, {
                 args,

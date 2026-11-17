@@ -19,6 +19,7 @@ import {
 } from './lib/project-config.mjs';
 import { Engine } from './lib/engine.mjs';
 import { describe, expectation, lines } from './lib/language.mjs';
+import { validateControlBindings } from './lib/control-bindings.mjs';
 import { settle } from './lib/dom.mjs';
 import { inspectCase, compileExpectation } from './lib/case-diagnostics.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
@@ -165,6 +166,7 @@ async function report(results, laya, source, warnings) {
             '截图采集说明',
             '步骤与断言证据',
             '用例可执行性诊断',
+            '未识别控件与绑定诊断',
         ],
         ...results.map((r) => [
             r.sheet,
@@ -180,6 +182,10 @@ async function report(results, laya, source, warnings) {
             r.screenshot_error,
             JSON.stringify(r.evidence || []),
             JSON.stringify(r.input_diagnostics || []),
+            JSON.stringify({
+                controls: r.unidentified_controls || [],
+                bindings: r.control_binding_diagnostics || [],
+            }),
         ]),
     ];
     await fs.writeFile(
@@ -211,6 +217,14 @@ async function report(results, laya, source, warnings) {
             if (d.code === 'needs-live-target') continue;
             md += `\n- ${clean(r.sheet)} 第${r.row}行 / ${clean(r.id)} / ${d.field} ${d.index}${d.clause ? ' 子句' + d.clause : ''}：${clean(d.text ?? '')}；${clean(d.message)}；${clean(d.suggestion)}\n`;
         }
+    }
+    md +=
+        '\n## 未识别控件与绑定诊断\n\n已发现但无可靠语义的控件不能按位置猜测操作。下列信息对应每条用例结束时的页面，结合该用例截图复核。\n';
+    for (const r of results) {
+        for (const c of r.unidentified_controls || [])
+            md += `\n- ${clean(r.id)}：frame ${c.frame} / ${clean(c.tag)} / ${clean(c.role)} / id=${clean(c.elementId)} / 行=${clean(c.rowKey)} / 上下文=${clean(c.context)}；${clean(c.suggestion)}\n`;
+        for (const d of r.control_binding_diagnostics || [])
+            md += `\n- ${clean(r.id)}：绑定 ${clean(d.name)} / ${clean(d.selector)}：${clean(d.code)}，本次没有应用该绑定。\n`;
     }
     await fs.writeFile(path.join(config.out, '报告.md'), md);
     await fs.writeFile(
@@ -290,6 +304,10 @@ async function main() {
         throw Error('--auth-state 需要 --auth-check 指定登录成功后的唯一页面标记');
     if ((config.authReset || config.authSessionStorage) && !config.authState)
         throw Error('--auth-reset / --auth-session-storage 需要 --auth-state');
+    if (arg('--control-bindings', ''))
+        config.controlBindings = validateControlBindings(
+            JSON.parse(await fs.readFile(arg('--control-bindings', ''), 'utf8')),
+        );
     if (arg('--labels', '')) {
         config.labels = JSON.parse(await fs.readFile(arg('--labels', ''), 'utf8'));
         if (
@@ -325,6 +343,8 @@ async function main() {
         }
     }
     if (workflowMode) {
+        if (config.controlBindings)
+            throw Error('--control-bindings 当前只用于普通 Excel 回归；结构化生成/重放需专项适配');
         config.caseFile = config.unifiedExecution
             ? config.excel
             : option('--case-file', 'TEST_CASE_FILE', 'caseFile', '');
