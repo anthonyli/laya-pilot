@@ -21,6 +21,9 @@ const text = (value, location, optional = false) => {
     if (optional && value === undefined) return '';
     if (typeof value !== 'string' || (!optional && !value.trim()))
         throw Error(`${location} 需要明确文本`);
+    // Reviewed text must survive XLSX materialization without truncation or XML loss.
+    if (value.length > 32767 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/u.test(value))
+        throw Error(`${location} 超出 Excel 文本限制或包含非法控制字符；请修订后重新审核`);
     return value;
 };
 const list = (value, location) => {

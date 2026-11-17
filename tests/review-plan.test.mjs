@@ -79,6 +79,21 @@ test('review schema requires explicit scope and preserves unknown business prere
         /重复/,
     );
     assert.throws(() => validateReviewPlan({ ...input, executable: 'anything' }), /未知字段/);
+    for (const key of ['id', 'title', 'preconditions', 'data', 'steps', 'expected']) {
+        for (const value of ['x'.repeat(32768), '前\u0000后'])
+            assert.throws(
+                () =>
+                    validateReviewPlan({ ...input, cases: [{ ...input.cases[0], [key]: value }] }),
+                /Excel 文本限制/,
+            );
+    }
+    assert.equal(
+        validateReviewPlan({
+            ...input,
+            cases: [{ ...input.cases[0], expected: 'x'.repeat(32767) }],
+        }).cases[0].expected.length,
+        32767,
+    );
 });
 
 test(
