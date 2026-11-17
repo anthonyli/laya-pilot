@@ -236,12 +236,18 @@ export async function observe(page) {
                                               ...e.querySelectorAll(
                                                   'i[aria-label]:not([aria-hidden="true"]),svg[aria-label]:not([aria-hidden="true"])',
                                               ),
-                                          ].map((icon) => icon.getAttribute('aria-label')),
+                                          ]
+                                              .filter(visible)
+                                              .map((icon) =>
+                                                  icon.getAttribute('aria-label').trim(),
+                                              ),
                                           ...[
                                               ...e.querySelectorAll(
                                                   'svg:not([aria-hidden="true"]) title',
                                               ),
-                                          ].map(text),
+                                          ]
+                                              .filter((title) => visible(title.closest('svg')))
+                                              .map(text),
                                       ].filter(Boolean),
                                   ),
                               ]
@@ -261,7 +267,10 @@ export async function observe(page) {
                                   : '';
                         const tooltipAction = tooltip.match(/不支持(.+?)(?:操作)?$/)?.[1];
                         let name = (
-                            e.getAttribute('aria-label')?.replace(/^图标[:：].*$/, '') ||
+                            e
+                                .getAttribute('aria-label')
+                                ?.trim()
+                                .replace(/^图标[:：].*$/, '') ||
                             labelled ||
                             labels ||
                             parentLabel ||
@@ -278,6 +287,7 @@ export async function observe(page) {
                             ''
                         )
                             .replace(/^\*\s*/, '')
+                            .trim()
                             .slice(0, 130);
                         const binding = bound.get(e);
                         let appliedBinding;

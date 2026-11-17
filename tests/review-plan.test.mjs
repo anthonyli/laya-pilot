@@ -105,7 +105,7 @@ test(
         const server = http.createServer((req, res) => {
             hits++;
             res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(
-                '<button>搜索</button>',
+                '<button>搜索</button><button id="unknown"><svg width="20" height="20"></svg></button>',
             );
         });
         await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -206,6 +206,12 @@ test(
             assert.equal(result.reviewPlan.url, url);
             assert.equal(result.reviewPlan.allowWrite, false);
             assert.equal(result.results[0].status, '通过');
+            assert.equal(result.results[0].unidentified_controls[0].elementId, 'unknown');
+            assert.ok(result.results[0].input_diagnostics);
+            assert.equal(result.results[0].evidence.length, 2);
+            const markdown = await fs.readFile(path.join(directory, 'result/报告.md'), 'utf8');
+            for (const heading of ['步骤与断言证据', '用例可执行性诊断', '未识别控件与绑定诊断'])
+                assert.ok(markdown.includes(heading));
             assert.equal(result.results[0].assertions[0].kind, 'conjunction');
             assert.equal(result.results[0].assertions[0].assertions.length, 2);
             assert.equal(result.results[0].expected, source(url).cases[0].expected);

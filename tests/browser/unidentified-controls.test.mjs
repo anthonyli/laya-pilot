@@ -37,6 +37,9 @@ test('unknown controls retain row/frame context; reliable labels target their ho
           <button><svg aria-hidden="true" width="20" height="20"><title>删除</title></svg>保存</button>
           <svg width="20" height="20"><title>独立装饰</title></svg>
           <button hidden id="hidden">${svg}</button><button id="hidden-child">${svg}<span style="display:none">错误名称</span></button><div inert><button id="inert">${svg}</button></div>
+          <button id="hidden-svg"><svg style="display:none"><title>导出</title></svg></button>
+          <button id="hidden-icon-ancestor"><span aria-hidden="true"><svg width="20" height="20" aria-label="删除"></svg></span></button>
+          <button id="blank-label" aria-label="   ">${svg}</button>
           <iframe srcdoc='<button id="framed"><svg width="20" height="20"></svg></button>'></iframe>`);
         await page.locator('iframe').waitFor();
         const snap = await observe(page);
@@ -50,7 +53,7 @@ test('unknown controls retain row/frame context; reliable labels target their ho
         assert.match(unknown.context, /记录甲/);
         assert.ok(unknown.ref);
         assert.equal(snap.unidentifiedControls.find((c) => c.elementId === 'framed').frame, 1);
-        assert.equal(snap.unidentifiedControls.length, 3);
+        assert.equal(snap.unidentifiedControls.length, 6);
         await page.evaluate(
             (svg) =>
                 document.body.insertAdjacentHTML(

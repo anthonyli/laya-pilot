@@ -19,8 +19,8 @@ export function validateControlBindings(bindings) {
             throw Error('控件绑定 url 必须是不含凭据的 HTTP(S) 完整地址');
         if (
             binding.name.length > 100 ||
-            /^图标[:：]/.test(binding.name) ||
-            /:(?:nth|first|last|only)-|data-laya-|>>/.test(binding.selector)
+            /^图标[:：]/.test(binding.name.trim()) ||
+            /:(?:nth|first|last|only)-|data-laya-|>>/i.test(binding.selector)
         )
             throw Error('控件绑定需要明确名称和稳定 CSS 选择器，不能使用位置或临时引用');
         return { url: url.href, selector: binding.selector.trim(), name: binding.name.trim() };
