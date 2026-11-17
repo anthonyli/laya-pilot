@@ -21,6 +21,7 @@ import { Engine } from './lib/engine.mjs';
 import { describe, expectation, lines } from './lib/language.mjs';
 import { validateControlBindings } from './lib/control-bindings.mjs';
 import { settle } from './lib/dom.mjs';
+import { inspectCase, compileExpectation } from './lib/case-diagnostics.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
     args = process.argv.slice(2);
 const arg = (n, d) => {
@@ -129,6 +130,7 @@ async function report(results, laya, source, warnings) {
         source,
         selection: config.selection,
         workbookFormat: 'natural-language',
+        ...(config.reviewPlan ? { reviewPlan: config.reviewPlan } : {}),
         import_warnings: warnings,
         mode: config.headless ? 'headless' : 'headed',
         provider: config.provider,
@@ -163,6 +165,7 @@ async function report(results, laya, source, warnings) {
             '截图',
             '截图采集说明',
             '步骤与断言证据',
+            '用例可执行性诊断',
             '未识别控件与绑定诊断',
         ],
         ...results.map((r) => [
@@ -178,6 +181,7 @@ async function report(results, laya, source, warnings) {
             r.screenshot,
             r.screenshot_error,
             JSON.stringify(r.evidence || []),
+            JSON.stringify(r.input_diagnostics || []),
             JSON.stringify({
                 controls: r.unidentified_controls || [],
                 bindings: r.control_binding_diagnostics || [],
@@ -206,6 +210,13 @@ async function report(results, laya, source, warnings) {
         md += '|序号|阶段|原文|范围|状态|采集时间|截图|\n|---|---|---|---|---|---|---|\n';
         for (const e of r.evidence)
             md += `|${e.sequence}|${e.phase === 'step' ? '步骤' : '预期'} ${e.index}|${clean(e.text)}|${clean(e.scope ?? '')}|${clean(e.status)}|${clean(e.at)}|${e.screenshot ? `[截图](${e.screenshot})` : clean(e.screenshot_error || '未采集')}|\n`;
+    }
+    md += '\n## 用例可执行性诊断\n\n诊断保留原业务意图；语法可解释不代表页面或测试通过。\n';
+    for (const r of results) {
+        for (const d of r.input_diagnostics || []) {
+            if (d.code === 'needs-live-target') continue;
+            md += `\n- ${clean(r.sheet)} 第${r.row}行 / ${clean(r.id)} / ${d.field} ${d.index}${d.clause ? ' 子句' + d.clause : ''}：${clean(d.text ?? '')}；${clean(d.message)}；${clean(d.suggestion)}\n`;
+        }
     }
     md +=
         '\n## 未识别控件与绑定诊断\n\n已发现但无可靠语义的控件不能按位置猜测操作。下列信息对应每条用例结束时的页面，结合该用例截图复核。\n';
@@ -242,6 +253,31 @@ async function main() {
         );
         return;
     }
+    if (arg('--mode', '') === 'plan') {
+        const { createReviewPlan } = await import('./lib/review-plan.mjs');
+        await createReviewPlan(args);
+        return;
+    }
+    if (arg('--plan-source', '')) throw Error('--plan-source 需要 --mode plan');
+    let review;
+    if (arg('--mode', '') === 'reviewed') {
+        const { loadReviewedPlan } = await import('./lib/review-plan.mjs');
+        review = await loadReviewedPlan(args, config.dryRun);
+        config.url = review.plan.url;
+        config.allowWrite = review.plan.allowWrite;
+        config.readOnly = !review.plan.allowWrite;
+        config.data = {};
+        config.operations = '';
+        config.excel = '';
+        config.reviewPlan = {
+            sha256: review.sha256,
+            url: review.plan.url,
+            allowWrite: review.plan.allowWrite,
+            status: config.dryRun ? 'inspected-unverified' : 'approved-for-execution',
+        };
+    }
+    if (arg('--review-plan', '') && !review) throw Error('--review-plan 需要 --mode reviewed');
+    if (arg('--approved-hash', '') && !review) throw Error('--approved-hash 需要 --mode reviewed');
     if (!config.excel && !arg('--mode', '')) throw Error('请通过--excel指定用例文件');
     if (!['local', 'api'].includes(config.provider))
         throw Error('--provider仅支持local或api，默认local');
@@ -287,7 +323,15 @@ async function main() {
         if (!d || typeof d !== 'object' || Array.isArray(d)) throw Error('--data必须是JSON对象');
         config.data = d;
     }
-    let workflowMode = arg('--mode', '');
+    if (review) {
+        const { materializeReviewedPlan } = await import('./lib/review-plan.mjs');
+        config.excel = await materializeReviewedPlan(review, config.python, config.out);
+        await fs.writeFile(
+            path.join(config.out, 'review-plan-approval.json'),
+            JSON.stringify(config.reviewPlan, null, 2),
+        );
+    }
+    let workflowMode = review ? '' : arg('--mode', '');
     if (!workflowMode && config.excel) {
         const { workbookCommand } = await import('./lib/workflow.mjs');
         const detected = await workbookCommand(config, 'detect', {
@@ -365,7 +409,15 @@ async function main() {
         title: c.title,
         preconditions: c.preconditions,
         steps: lines(c.steps).map((text) => ({ text, ...describe(text) })),
-        expected: lines(c.expected).map((text) => ({ text, ...expectation(text) })),
+        expected: lines(c.expected).map((text) => {
+            const assertions = compileExpectation(text);
+            return assertions.length > 1
+                ? { text, kind: 'conjunction', assertions }
+                : { text, ...expectation(text) };
+        }),
+        sheet: c.sheet,
+        row: c.row,
+        ...inspectCase(c, config.data),
     }));
     await fs.writeFile(
         path.join(config.out, 'excel-inspection.json'),
@@ -379,6 +431,7 @@ async function main() {
 
     if (config.dryRun) {
         console.log('Excel检查结果：' + path.join(config.out, 'excel-inspection.json'));
+        if (config.reviewPlan) console.log('REVIEW_PLAN ' + JSON.stringify(config.reviewPlan));
         laya.close();
         return;
     }

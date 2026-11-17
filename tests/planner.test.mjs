@@ -81,7 +81,7 @@ test('Later unknown steps preserve earlier evidence and actually reach model fal
             key: 'x',
             title: '观察和填写',
             preconditions: '',
-            steps: '查看页面\n输入正常名称',
+            steps: '查看页面\n将“名称”改成“甲”',
             expected: '页面显示「完成」',
         });
         assert.equal(calls, 1);

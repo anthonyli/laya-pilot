@@ -17,6 +17,9 @@ Setup: node scripts/setup.mjs [--python PATH] [--skip-browser]
 Check: node scripts/setup.mjs --check
 Regression: node scripts/run.mjs --excel FILE.xlsx --url URL --headless
 Inspect: node scripts/run.mjs --excel FILE.xlsx --inspect
+Offline draft: node scripts/run.mjs --mode plan --plan-source CASES.json [--out NEW_DIR]
+Review: node scripts/run.mjs --mode reviewed --review-plan draft-plan.json --inspect
+Approved execution: node scripts/run.mjs --mode reviewed --review-plan draft-plan.json --approved-hash SHA256
 Configuration: .env.local stores API access and optional login settings; pass the workbook and URL per task.
 Excel defaults to all imported cases, regardless of historical result or case type.
 Optional generation: node scripts/run.mjs --mode generate --url URL [--case-file FILE.xlsx]
@@ -32,6 +35,12 @@ Options: --python PATH, --headless, --manual-login, --out DIR,
 See references/setup.md and references/workflows.md for details.`);
         return;
     }
+    if (option(args, '--mode') === 'plan') {
+        const { createReviewPlan } = await import('./lib/review-plan.mjs');
+        await createReviewPlan(args);
+        return;
+    }
+    if (args.includes('--plan-source')) throw Error('--plan-source 需要 --mode plan');
     const { settings, summary } = await resolveSkillSettings(args);
     // A local model is an explicit per-run choice. Inherited environment/config cannot opt in.
     const provider = option(args, '--provider') || 'api';
