@@ -161,6 +161,7 @@ async function report(results, laya, source, warnings) {
             '断言总数',
             '截图',
             '截图采集说明',
+            '步骤与断言证据',
         ],
         ...results.map((r) => [
             r.sheet,
@@ -174,6 +175,7 @@ async function report(results, laya, source, warnings) {
             r.assertions.length,
             r.screenshot,
             r.screenshot_error,
+            JSON.stringify(r.evidence || []),
         ]),
     ];
     await fs.writeFile(
@@ -190,6 +192,15 @@ async function report(results, laya, source, warnings) {
         )}。通过要求步骤完整执行且全部预期有明确断言；跳过不计通过。\n\n|编号|用例|结果|原因|截图|\n|---|---|---|---|---|\n`;
     for (const r of results)
         md += `|${clean(r.id)}|${clean(r.title)}|${r.status}|${clean(r.reason)}${r.screenshot_error ? '；' + clean(r.screenshot_error) : ''}|${r.screenshot ? `[截图](${r.screenshot})` : ''}|\n`;
+    md +=
+        '\n## 步骤与断言证据\n\n每张图是对应步骤或断言结束时的页面快照；动作完成不等于业务断言通过。未完成步骤的图仅表示停止现场。\n';
+    for (const r of results) {
+        if (!r.evidence?.length) continue;
+        md += `\n### ${clean(r.sheet)} / 第${r.row}行 / ${clean(r.id)} ${clean(r.title)}\n\n`;
+        md += '|序号|阶段|原文|范围|状态|采集时间|截图|\n|---|---|---|---|---|---|---|\n';
+        for (const e of r.evidence)
+            md += `|${e.sequence}|${e.phase === 'step' ? '步骤' : '预期'} ${e.index}|${clean(e.text)}|${clean(e.scope ?? '')}|${clean(e.status)}|${clean(e.at)}|${e.screenshot ? `[截图](${e.screenshot})` : clean(e.screenshot_error || '未采集')}|\n`;
+    }
     await fs.writeFile(path.join(config.out, '报告.md'), md);
     await fs.writeFile(
         path.join(ROOT, 'latest-run.json'),
