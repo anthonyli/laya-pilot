@@ -1,6 +1,6 @@
 # LayaPilot · 企业管理后台自动化测试
 
-[English](README.en.md) · [使用指南](references/workflows.md) · [配置说明](references/setup.md) · [架构](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
+[English](README.en.md) · [更新说明](references/changelog.md) · [下载 skill](https://github.com/anthonyli/laya-pilot/releases/latest) · [使用指南](references/workflows.md) · [配置说明](references/setup.md) · [架构](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
 
 把已有 Excel 测试用例交给 AI，在浏览器中按原步骤和预期执行，获得测试报告与失败证据。LayaPilot 主要面向企业后台的表格、筛选、表单和增删改查，也支持按需从页面生成经过实际验证的新用例。
 

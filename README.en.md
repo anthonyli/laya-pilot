@@ -1,6 +1,6 @@
 # LayaPilot · Browser Tests for Enterprise Admin Applications
 
-[中文](README.md) · [Workflow guide](references/workflows.md) · [Setup](references/setup.md) · [Architecture](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
+[中文](README.md) · [Workflow guide](references/workflows.md) · [Setup](references/setup.md) · [Architecture](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues) · [Changelog](references/changelog.md) · [Download skill](https://github.com/anthonyli/laya-pilot/releases/latest)
 
 Give an AI assistant your existing Excel test cases, execute their original steps and expected results in a browser, and get reports with failure evidence. LayaPilot focuses on admin tables, filters, forms, and CRUD operations. It can also generate new cases after executing and verifying them.
 

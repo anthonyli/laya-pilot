@@ -49,6 +49,8 @@ description: Run browser regression tests from user-provided Excel test cases fo
 
 ## 工作入口
 
+- 查询版本变更、升级兼容性与已知范围：读取 [references/changelog.md](references/changelog.md)。
+
 - 仅解读已有报告：直接读取用户指定的 `results.json` 和证据，无须安装依赖、配置 API 或重新测试。
 - 安装、检查环境或配置模型：按需读取 [references/setup.md](references/setup.md)。
 - 执行已有用例回归、登录和结果解释：读取 [references/workflows.md](references/workflows.md) 的主流程；按需查看其中的生成流程和内部格式说明。
