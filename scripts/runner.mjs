@@ -129,6 +129,7 @@ async function report(results, laya, source, warnings) {
         source,
         selection: config.selection,
         workbookFormat: 'natural-language',
+        ...(config.reviewPlan ? { reviewPlan: config.reviewPlan } : {}),
         import_warnings: warnings,
         mode: config.headless ? 'headless' : 'headed',
         provider: config.provider,
@@ -238,6 +239,31 @@ async function main() {
         );
         return;
     }
+    if (arg('--mode', '') === 'plan') {
+        const { createReviewPlan } = await import('./lib/review-plan.mjs');
+        await createReviewPlan(args);
+        return;
+    }
+    if (arg('--plan-source', '')) throw Error('--plan-source 需要 --mode plan');
+    let review;
+    if (arg('--mode', '') === 'reviewed') {
+        const { loadReviewedPlan } = await import('./lib/review-plan.mjs');
+        review = await loadReviewedPlan(args, config.dryRun);
+        config.url = review.plan.url;
+        config.allowWrite = review.plan.allowWrite;
+        config.readOnly = !review.plan.allowWrite;
+        config.data = {};
+        config.operations = '';
+        config.excel = '';
+        config.reviewPlan = {
+            sha256: review.sha256,
+            url: review.plan.url,
+            allowWrite: review.plan.allowWrite,
+            status: config.dryRun ? 'inspected-unverified' : 'approved-for-execution',
+        };
+    }
+    if (arg('--review-plan', '') && !review) throw Error('--review-plan 需要 --mode reviewed');
+    if (arg('--approved-hash', '') && !review) throw Error('--approved-hash 需要 --mode reviewed');
     if (!config.excel && !arg('--mode', '')) throw Error('请通过--excel指定用例文件');
     if (!['local', 'api'].includes(config.provider))
         throw Error('--provider仅支持local或api，默认local');
@@ -279,7 +305,15 @@ async function main() {
         if (!d || typeof d !== 'object' || Array.isArray(d)) throw Error('--data必须是JSON对象');
         config.data = d;
     }
-    let workflowMode = arg('--mode', '');
+    if (review) {
+        const { materializeReviewedPlan } = await import('./lib/review-plan.mjs');
+        config.excel = await materializeReviewedPlan(review, config.python, config.out);
+        await fs.writeFile(
+            path.join(config.out, 'review-plan-approval.json'),
+            JSON.stringify(config.reviewPlan, null, 2),
+        );
+    }
+    let workflowMode = review ? '' : arg('--mode', '');
     if (!workflowMode && config.excel) {
         const { workbookCommand } = await import('./lib/workflow.mjs');
         const detected = await workbookCommand(config, 'detect', {
@@ -377,6 +411,7 @@ async function main() {
 
     if (config.dryRun) {
         console.log('Excel检查结果：' + path.join(config.out, 'excel-inspection.json'));
+        if (config.reviewPlan) console.log('REVIEW_PLAN ' + JSON.stringify(config.reviewPlan));
         laya.close();
         return;
     }
