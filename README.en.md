@@ -29,7 +29,7 @@ There are two ways to use LayaPilot. **They are installed separately and do not 
 
 The options are identical: `laya X` corresponds to `node scripts/run.mjs X`, and `laya setup` to `node scripts/setup.mjs`.
 
-**Requirements:** Node.js 20+ with npm. Excel features also need Python 3.10+ with venv and pip. Recording and replaying Playwright scripts only does not need Python.
+**Requirements:** Node.js 20+ with npm only. The Python and browser used by Excel features are prepared automatically during installation, see below.
 
 ## Command-line quick start
 
@@ -39,9 +39,16 @@ The options are identical: `laya X` corresponds to `node scripts/run.mjs X`, and
 git clone https://github.com/anthonyli/laya-pilot.git
 cd laya-pilot
 npm install
-npm link            # use sudo npm link if you lack permission
-laya setup          # installs Chromium, a Python venv and openpyxl, and creates the config file
+npm link            # links the laya command and prepares the runtime
 ```
+
+`npm link` (or `npm install -g`) runs `laya setup` once automatically:
+
+- **Python**: the newest Python 3.10+ on this computer is used; if there is none, a private standalone Python (about 25–70 MB) is downloaded for LayaPilot. Older system versions such as macOS's 3.9 are skipped.
+- **Browser**: an installed Playwright Chromium, Chrome or Edge is used first; Chromium is downloaded only when none is found.
+- The config file `~/.laya/.env.local` is created.
+
+It does not run automatically under `sudo`, in CI or with `LAYA_SKIP_SETUP=1`; run `laya setup` yourself then. An incomplete setup (for example a network error) does not fail the installation, and rerunning `laya setup` reuses finished steps. Pick a Python with `laya setup --python python3.12`.
 
 Configuration, the Python environment and models live in `~/.laya/` and survive reinstalling `laya`. Set `LAYA_HOME` to use another directory.
 
@@ -86,15 +93,15 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 - All cases run by default. Steps and expectations are kept as written, and the input workbook is never modified.
 - Cases that create, edit or delete data need `--allow-write` in a test environment.
 
-### Record actions as a case
+### Record actions as test cases
 
 ```bash
 laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
 ```
 
-1. Perform the workflow in the browser that opens, and use the toolbar's assertion buttons to mark what should appear.
-2. Closing the browser saves both `filter.xlsx` (an editable natural-language case) and `filter.spec.cjs` (the original Playwright script).
-3. Replay the Excel case:
+1. Perform the workflow in the browser. Laya creates assertions from observed changes, and you can mark additional checks from the toolbar.
+2. Finish the recording or close the browser to save `filter.xlsx` (the split, editable cases) and `filter.spec.cjs` (the Playwright script).
+3. Replay the workbook. Use `--cases REC-001` to run a single case.
 
 ```bash
 laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
@@ -160,7 +167,7 @@ cases/         one directory per case with a screenshot for every step, e.g. 03-
 logs/          process files for troubleshooting
 ```
 
-Open it with `laya report runs/laya-pilot/<date_time>`. The top of the page gives the verdict: **passed with complete evidence**, **passed but needs review** or **failed**, with the reasons, such as blocked cases, unverified expectations, page or API errors, or missing screenshots. A pass count alone does not tell you whether the result can be trusted; read the verdict.
+Run `laya report` from the directory where you ran the test to open the latest report. Use `laya report RUN_DIR` to open a specific run. The top of the page gives the verdict: **passed with complete evidence**, **passed but needs review** or **failed**, with the reasons, such as blocked cases, unverified expectations, page or API errors, or missing screenshots. A pass count alone does not tell you whether the result can be trusted; read the verdict.
 
 - Generated cases go to `generated-cases/` and include only cases that executed and passed assertions.
 - A passing `--inspect` only means the workbook is valid; page assertions decide whether a test passes.

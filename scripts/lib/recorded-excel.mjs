@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { parse } from 'acorn';
 import { cmd, resolveSkillSettings, skillRoot } from '../common.mjs';
 import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
@@ -17,9 +18,25 @@ const recordedRoles = {
     menuitem: '菜单项',
 };
 
+// Keys the Excel executor can replay as "按下 KEY".
+const replayableKeys = new Set(['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp']);
+// Pressing one of these alone changes nothing on the page; Codegen records them while typing.
+const ignorableKeys = new Set([
+    'CapsLock',
+    'Shift',
+    'Control',
+    'Alt',
+    'Meta',
+    'NumLock',
+    'ScrollLock',
+]);
+let sourceLines = [];
+
 function unsupported(node) {
+    const line = node?.loc?.start.line;
+    const code = line ? sourceLines[line - 1]?.trim() : '';
     throw Error(
-        `录制文件第 ${node?.loc?.start.line ?? '?'} 行无法转换为 Excel 步骤，请查看保留的 Playwright 用例。`,
+        `录制文件第 ${line ?? '?'} 行无法转换为 Excel 步骤${code ? `：${code}` : ''}。Playwright 用例已保留，可直接回放，或删除这一行后重新导出。`,
     );
 }
 
@@ -79,6 +96,8 @@ function locator(call) {
 }
 
 export function recordedCase(source) {
+    sourceLines = source.split(/\r?\n/);
+    const skipped = [];
     const program = parse(source, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
     const calls = program.body.filter((s) => s.expression?.callee?.name === 'test');
     if (calls.length !== 1) throw Error('请选择包含一条测试的 Playwright 录制文件。');
@@ -163,6 +182,17 @@ export function recordedCase(source) {
             continue;
         }
         const { name, role, ordinal } = locator(object);
+        if (action === 'press' && call.arguments.length === 1) {
+            const key = literal(call.arguments[0]);
+            if (ignorableKeys.has(key)) {
+                skipped.push(`第 ${call.loc.start.line} 行按下 ${key}（不影响页面）`);
+                continue;
+            }
+            if (!replayableKeys.has(key) || ordinal !== null) unsupported(call);
+            // The executor presses the key on the focused element, which the recorded locator just used.
+            steps.push(`按下 ${key}`);
+            continue;
+        }
         if (action === 'fill' && role === 'textbox' && call.arguments.length === 1) {
             if (/密码|password|passwd|token|api[\s_-]*key/i.test(name)) unsupported(call);
             const value = literal(call.arguments[0]);
@@ -192,12 +222,25 @@ export function recordedCase(source) {
         data: Object.keys(data).length ? JSON.stringify(data, null, 2) : '',
         steps: steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
         expected: expected.join('\n'),
+        skipped,
     };
 }
 
-export async function exportRecording(file, output, python) {
-    const source = await fs.readFile(file, 'utf8');
-    const testCase = recordedCase(source);
+const manifestMarker = '\n// laya-recorded-excel-v1 ';
+
+function specHash(source) {
+    return createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex');
+}
+
+export function attachRecordedCases(source, generated) {
+    const manifest = Buffer.from(
+        JSON.stringify({ ...generated, sourceHash: specHash(source) }),
+    ).toString('base64');
+    return `${source}${manifestMarker}${manifest}\n`;
+}
+
+export async function writeRecordedCases(cases, output, python) {
+    if (!Array.isArray(cases) || !cases.length) throw Error('没有可导出的录制用例。');
     const settings = !python && (await resolveSkillSettings([])).settings;
     python ||= settings.python;
     if (!python)
@@ -220,7 +263,25 @@ export async function exportRecording(file, output, python) {
             code === 0 ? resolve() : reject(Error(`Excel 导出失败：${details}`)),
         );
         child.stdin.on('error', reject);
-        child.stdin.end(JSON.stringify(testCase));
+        child.stdin.end(JSON.stringify(cases));
     });
+}
+
+export async function exportRecording(file, output, python) {
+    const source = await fs.readFile(file, 'utf8');
+    const marker = source.lastIndexOf(manifestMarker);
+    if (marker !== -1) {
+        const data = source.slice(marker + manifestMarker.length).trim();
+        if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) throw Error('录制用例清单无效。');
+        const { sourceHash, ...generated } = JSON.parse(Buffer.from(data, 'base64').toString());
+        if (sourceHash !== specHash(source.slice(0, marker)))
+            throw Error(
+                'Playwright 脚本自录制后已修改，无法重新导出原录制断言。请编辑配套 Excel 或重新录制。',
+            );
+        await writeRecordedCases(generated.cases, output, python);
+        return generated;
+    }
+    const testCase = recordedCase(source);
+    await writeRecordedCases([testCase], output, python);
     return testCase;
 }

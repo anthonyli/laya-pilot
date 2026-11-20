@@ -19,6 +19,9 @@ export const RUN_FILES = {
     trace: 'trace/trace.zip',
 };
 
+export const projectRunsDirectory = (cwd = process.cwd()) => path.join(cwd, 'runs', 'laya-pilot');
+export const LATEST_RUN = 'latest.json';
+
 /** Relative path of a process file under logs/. */
 export const logPath = (name) => `logs/${name}`;
 

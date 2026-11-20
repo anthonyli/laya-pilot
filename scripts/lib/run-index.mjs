@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { RUN_FILES } from './run-layout.mjs';
+import { LATEST_RUN, projectRunsDirectory, RUN_FILES } from './run-layout.mjs';
+import { writePrivateJson } from './run-state.mjs';
 import { eventLabel } from './diagnostics.mjs';
 
 // Turns any run directory (ordinary Excel, structured plan or Playwright replay)
@@ -370,8 +371,47 @@ async function exists(file) {
     );
 }
 
+async function reportFile(index) {
+    try {
+        const stat = await fs.stat(index);
+        return stat.isFile() ? stat : null;
+    } catch (error) {
+        if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+        return null;
+    }
+}
+
+export async function latestReportIndex(cwd = process.cwd()) {
+    const root = projectRunsDirectory(cwd);
+    let latest;
+    try {
+        latest = JSON.parse(await fs.readFile(path.join(root, LATEST_RUN), 'utf8'));
+    } catch (error) {
+        if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    }
+    if (typeof latest?.directory === 'string' && path.isAbsolute(latest.directory)) {
+        const index = path.join(latest.directory, RUN_FILES.index);
+        if (await reportFile(index)) return index;
+    }
+
+    // Older or moved projects may have reports without a usable latest pointer.
+    const entries = await fs.readdir(root, { withFileTypes: true }).catch((error) => {
+        if (error.code !== 'ENOENT') throw error;
+        return [];
+    });
+    let newest;
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const index = path.join(root, entry.name, RUN_FILES.index);
+        const stat = await reportFile(index);
+        if (stat && (!newest || stat.mtimeMs > newest.mtime))
+            newest = { index, mtime: stat.mtimeMs };
+    }
+    return newest?.index;
+}
+
 /** Write index.html and update runs/laya-pilot/latest.json for a finished run. */
-export async function finalizeRun(out) {
+export async function finalizeRun(out, cwd = process.cwd()) {
     const view = await readRun(out);
     const assessment = assess(view);
     // Every run gets a text report; Excel runners write a richer one themselves.
@@ -385,24 +425,21 @@ export async function finalizeRun(out) {
         path.join(out, RUN_FILES.index),
         renderIndex(view, assessment, files, hasTrace),
     );
-    const latestRoot = path.join(process.cwd(), 'runs', 'laya-pilot');
-    if (path.dirname(path.resolve(out)) === latestRoot)
-        await fs.writeFile(
-            path.join(latestRoot, 'latest.json'),
-            JSON.stringify(
-                {
-                    directory: path.resolve(out),
-                    index: path.join(path.resolve(out), RUN_FILES.index),
-                    verdict: assessment.verdict.text,
-                    passed: assessment.passed,
-                    failed: assessment.failed,
-                    blocked: assessment.blocked,
-                    total: assessment.total,
-                },
-                null,
-                2,
-            ) + '\n',
-        );
+    const latest = path.join(projectRunsDirectory(cwd), LATEST_RUN);
+    const directory = path.resolve(out);
+    try {
+        writePrivateJson(latest, {
+            directory,
+            index: path.join(directory, RUN_FILES.index),
+            verdict: assessment.verdict.text,
+            passed: assessment.passed,
+            failed: assessment.failed,
+            blocked: assessment.blocked,
+            total: assessment.total,
+        });
+    } catch (error) {
+        console.warn(`Could not update latest report (${error.code || error.message}): ${latest}`);
+    }
     console.log(`REPORT ${path.join(out, RUN_FILES.index)}`);
     return { view, assessment };
 }

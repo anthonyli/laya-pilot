@@ -1,4 +1,4 @@
-import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
+import { HEALTH_EXPECTATIONS, OPTIONAL_API_EXPECTATION } from './diagnostics.mjs';
 
 // General instruction grammar only. No case IDs, module names, routes or CSS selectors.
 export class Halt extends Error {
@@ -48,6 +48,14 @@ export function parseData(s) {
 export function describe(step) {
     const q = quoted(step);
     let m;
+    if ((m = step.match(/^在「([^」]+)」列中定位值为「([^」]+)」的唯一记录$/)))
+        return { verb: 'bindExactRecord', column: m[1], value: m[2] };
+    if ((m = step.match(/^在弹窗中点击「([^」]+)」按钮$/)))
+        return { verb: 'click', target: m[1], scope: 'dialog' };
+    if ((m = step.match(/^在弹窗的「([^」]+)」输入框中输入「([^」]*)」$/)))
+        return { verb: 'fill', target: m[1], value: m[2], scope: 'dialog' };
+    if ((m = step.match(/^清空弹窗的「([^」]+)」输入框$/)))
+        return { verb: 'clear', target: m[1], scope: 'dialog' };
     if (/^(?:打开网址|访问网址|navigate to|open url)\s*/i.test(step)) {
         const target = step.match(/https?:\/\/\S+/)?.[0];
         return { verb: 'navigate', target: target?.replace(/[”」"]$/, '') };
@@ -206,10 +214,33 @@ export function actionCriteria(spec) {
 export function expectation(text) {
     const health = Object.entries(HEALTH_EXPECTATIONS).find(([, phrase]) => phrase === text);
     if (health) return { kind: 'health', category: health[0] };
+    if (text === OPTIONAL_API_EXPECTATION) return { kind: 'health', category: 'api' };
     if (text === '录制设置的步骤预期全部满足') return { kind: 'recorded-checkpoints' };
     if (text === '业务结果待补充（录制时未设置预期）') return { kind: 'business-expectation' };
     let m;
     const q = quoted(text);
+    if (
+        (m = text.match(
+            /^列表中「([^」]+)」列值为「([^」]+)」的唯一记录中「([^」]+)」列值为「([^」]*)」$/,
+        ))
+    )
+        return {
+            kind: 'exactRecord',
+            column: m[1],
+            value: m[2],
+            fieldColumn: m[3],
+            fieldValue: m[4],
+            match: 'field',
+        };
+    if ((m = text.match(/^列表中「([^」]+)」列(存在|不存在)值为「([^」]+)」的(唯一)?记录$/)))
+        return {
+            kind: 'exactRecord',
+            column: m[1],
+            value: m[3],
+            match: m[2] === '不存在' ? 'absent' : m[4] ? 'unique' : 'present',
+        };
+    if ((m = text.match(/^列表中「([^」]+)」列的全部记录值为「([^」]+)」$/)))
+        return { kind: 'exactRecord', column: m[1], value: m[2], match: 'all' };
     if ((m = text.match(/^[「“"](.+)[」”"]按钮(?:置灰不可点击|置灰|不可点击|不可用)$/)))
         return { kind: 'disabled', target: m[1] };
     if ((m = text.match(/^悬浮提示[「“"](.+)[」”"]$/))) return { kind: 'tooltip', target: m[1] };

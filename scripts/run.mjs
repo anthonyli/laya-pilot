@@ -2,7 +2,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { safeText } from './lib/diagnostics.mjs';
 import { printHome, printRunHelp } from './lib/cli-output.mjs';
-import { uniqueRunDirectory } from './lib/run-layout.mjs';
+import { projectRunsDirectory, uniqueRunDirectory } from './lib/run-layout.mjs';
 import {
     cmd,
     isCli,
@@ -24,6 +24,12 @@ async function main() {
         args = ['--excel', args[1], ...args.slice(2)];
     }
     if (['record', 'replay', 'report', 'export-excel'].includes(args[0])) {
+        if (args[0] !== 'report') {
+            // Recording and replay honour .env.local too, e.g. BROWSER_CHANNEL chosen by setup.
+            const { loadLocalEnvironment } = await import('./lib/project-config.mjs');
+            const { dataRoot } = await import('./lib/entry.mjs');
+            await loadLocalEnvironment(dataRoot);
+        }
         const { runRecordingCommand } = await import('./lib/recording.mjs');
         process.exitCode = await runRecordingCommand(args[0], args.slice(1));
         return;
@@ -74,7 +80,7 @@ async function main() {
         if (!args.includes('--api-model')) args.push('--api-model', settings.apiModel);
     }
     {
-        const out = uniqueRunDirectory(path.join(process.cwd(), 'runs', 'laya-pilot'));
+        const out = uniqueRunDirectory(projectRunsDirectory());
         const id = path.basename(out);
         if (!args.includes('--out') && !process.env.TEST_OUTPUT) args.push('--out', out);
         if (

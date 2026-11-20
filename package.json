@@ -1,6 +1,6 @@
 {
     "name": "laya-pilot",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "private": false,
     "description": "Run browser regression tests from existing Excel cases for enterprise admin applications",
     "license": "MIT",
@@ -13,6 +13,7 @@
     },
     "files": [
         "bin/laya.mjs",
+        "scripts/postinstall.mjs",
         "scripts/common.mjs",
         "scripts/run.mjs",
         "scripts/runner.mjs",
@@ -38,7 +39,8 @@
         "skill:package": "uv run --no-project python scripts/package_skill.py",
         "skill:check": "uv run --no-project python scripts/package_skill.py --check",
         "start": "node scripts/run.mjs",
-        "demo": "node scripts/demo-server.mjs"
+        "demo": "node scripts/demo-server.mjs",
+        "postinstall": "node scripts/postinstall.mjs"
     },
     "dependencies": {
         "acorn": "8.15.0",

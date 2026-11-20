@@ -4,14 +4,14 @@
 
 ## 默认 API 模式
 
-| 组件           | 要求                                       | 安装方式                         |
-| -------------- | ------------------------------------------ | -------------------------------- |
-| Node.js 与 npm | Node.js 20+，含 npm                        | 用户先安装到系统                 |
-| Python         | 3.10+，含 venv/pip；建议 3.11 或 3.12      | 用户先安装到系统                 |
-| 浏览器驱动     | Playwright，版本由包内 lockfile 固定       | 安装脚本执行 `npm ci --omit=dev` |
-| 浏览器         | Playwright Chromium                        | 安装脚本安装对应版本             |
-| Excel 读写     | Python openpyxl，范围见 `requirements.txt` | 安装到 skill 内 `.venv/`         |
-| 模型           | 用户提供的 HTTPS API、模型名称和密钥       | 用户配置，无本地权重下载         |
+| 组件           | 要求                                       | 安装方式                                                            |
+| -------------- | ------------------------------------------ | ------------------------------------------------------------------- |
+| Node.js 与 npm | Node.js 20+，含 npm                        | 用户先安装到系统                                                    |
+| Python         | 3.10+，含 venv/pip                         | 自动选用本机最新版本；都没有时下载独立 Python 到 skill 内 `python/` |
+| 浏览器驱动     | Playwright，版本由包内 lockfile 固定       | 安装脚本执行 `npm ci --omit=dev`                                    |
+| 浏览器         | Playwright Chromium、Chrome 或 Edge        | 优先使用本机已有的浏览器，都没有时下载 Chromium                     |
+| Excel 读写     | Python openpyxl，范围见 `requirements.txt` | 安装到 skill 内 `.venv/`                                            |
+| 模型           | 用户提供的 HTTPS API、模型名称和密钥       | 用户配置，无本地权重下载                                            |
 
 在解压后的 skill 目录执行：
 
@@ -19,7 +19,9 @@
 node scripts/setup.mjs
 ```
 
-安装脚本会创建 `.venv/`、安装 Node/Python 依赖和 Chromium，并在 skill 根目录从 `assets/.env.example` 创建唯一的 `.env.local` 配置文件，与 `SKILL.md` 同级。已有文件保留原样。它不安装本地 Laya、不下载模型权重。需要选择 Python 时使用：
+安装脚本会创建 `.venv/`、安装 Node/Python 依赖并准备浏览器，并在 skill 根目录从 `assets/.env.example` 创建唯一的 `.env.local` 配置文件，与 `SKILL.md` 同级。已有文件保留原样。它不安装本地 Laya、不下载模型权重。
+
+Python 按以下顺序选择：`--python` 指定的版本，已有的 `.venv/`，本机 `python3.13` 至 `python3.10`、`python3`（含 Homebrew、`~/.local/bin`、pyenv 和 uv 管理的版本）。低于 3.10 或缺少 venv 的版本会被跳过并说明原因；都不可用时，下载固定版本的独立 Python（python-build-standalone，校验 SHA-256）。浏览器优先使用已有的 Playwright Chromium，其次是本机 Chrome、Edge，并写入 `BROWSER_CHANNEL`；都没有时才下载 Chromium。已配置的 `BROWSER_CHANNEL` 不会被改写。需要选择 Python 时使用：
 
 ```bash
 node scripts/setup.mjs --python /absolute/path/to/python3.11
@@ -27,7 +29,7 @@ node scripts/setup.mjs --python /absolute/path/to/python3.11
 
 Windows 也使用同一 Node 入口；脚本会选择 `.venv\Scripts\python.exe`，并支持系统 `python` 或 `py -3`。可通过 `--python` 指定 Python 可执行文件。Linux 如缺少 `venv` 或浏览器系统库，先安装对应系统组件；浏览器库可由管理员执行 `node node_modules/playwright/cli.js install-deps chromium` 安装。安装脚本不会自行提权。
 
-已有匹配 Chromium 的环境可以加 `--skip-browser`。这只跳过浏览器下载，不代表浏览器已经可用；之后用 `--check` 检查。
+加 `--skip-browser` 会跳过浏览器这一步，之后用 `--check` 检查实际使用的浏览器是否可用。
 
 ## 填写 API
 
@@ -122,7 +124,7 @@ node scripts/run.mjs --excel '/absolute/path/cases.xlsx' \
 | ------------------------------------------ | ---------------------------------------- | -------------------------------------------------------- |
 | `--excel` / `--url`                        | `TEST_EXCEL` / `TEST_URL`                | 本次输入工作簿 / 目标页面                                |
 | `--headless` / `--headed`                  | `BROWSER_HEADLESS`                       | 无头 / 可见浏览器，默认可见                              |
-| `--browser-provider` / `--browser-channel` | `BROWSER_PROVIDER` / `BROWSER_CHANNEL`   | 驱动仅支持 `playwright`；默认使用安装的 Chromium         |
+| `--browser-provider` / `--browser-channel` | `BROWSER_PROVIDER` / `BROWSER_CHANNEL`   | 驱动仅支持 `playwright`；通道由 setup 按本机浏览器选择   |
 | `--language`                               | `TEST_LANGUAGE`                          | `auto`（默认）、`zh-CN`、`en` 或 `none`                  |
 | `--operations`                             | `TEST_OPERATIONS`                        | 生成或结构化回放的操作范围；普通 Excel 执行留空          |
 | `--data FILE`                              | `TEST_DATA`                              | 字段覆盖；命令行读取 JSON 文件，环境变量为内联 JSON 对象 |

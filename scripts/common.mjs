@@ -128,21 +128,6 @@ export function pythonVersion(command, prefix = []) {
     return major > 3 || (major === 3 && minor >= 10) ? match[0] : null;
 }
 
-export function findPython(explicit) {
-    const candidates = explicit
-        ? [[explicit, []]]
-        : [
-              ['python3', []],
-              ['python', []],
-              ...(process.platform === 'win32' ? [['py', ['-3']]] : []),
-          ];
-    for (const [command, prefix] of candidates) {
-        const version = pythonVersion(command, prefix);
-        if (version) return { command, prefix, version };
-    }
-    throw Error('Python 3.10+ with venv/pip is required; use --python to select it.');
-}
-
 export function npmCommand() {
     if (process.platform !== 'win32') return ['npm', []];
     const candidates = [

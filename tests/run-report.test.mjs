@@ -1,10 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { caseDirectory, runDirectoryName, slug } from '../scripts/lib/run-layout.mjs';
-import { assess, finalizeRun, outcome } from '../scripts/lib/run-index.mjs';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import {
+    caseDirectory,
+    projectRunsDirectory,
+    runDirectoryName,
+    slug,
+} from '../scripts/lib/run-layout.mjs';
+import { assess, finalizeRun, latestReportIndex, outcome } from '../scripts/lib/run-index.mjs';
+
+const exec = promisify(execFile);
+const cli = fileURLToPath(new URL('../bin/laya.mjs', import.meta.url));
 
 test('case directories are ordered, readable and stay inside cases/', () => {
     assert.equal(caseDirectory(1, '001', '标题检查'), 'cases/001-标题检查');
@@ -55,8 +66,9 @@ test('reliability verdict separates failures, gaps and clean passes', () => {
 });
 
 test('finalizeRun writes an index that links every screenshot and a summary', async (t) => {
-    const out = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-run-index-'));
-    t.after(() => fs.rm(out, { recursive: true, force: true }));
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-run-index-'));
+    t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+    const out = path.join(cwd, 'custom-out');
     await fs.mkdir(path.join(out, 'cases/001-缺失'), { recursive: true });
     await fs.writeFile(path.join(out, 'cases/001-缺失/01-预期1-失败.png'), 'png');
     await fs.writeFile(
@@ -87,7 +99,7 @@ test('finalizeRun writes an index that links every screenshot and a summary', as
             ],
         }),
     );
-    const { assessment } = await finalizeRun(out);
+    const { assessment } = await finalizeRun(out, cwd);
     assert.equal(assessment.verdict.text, '未通过');
     const html = await fs.readFile(path.join(out, 'index.html'), 'utf8');
     assert.ok(
@@ -96,4 +108,41 @@ test('finalizeRun writes an index that links every screenshot and a summary', as
     assert.ok(html.includes('&lt;缺失&gt;'), 'case text is escaped');
     assert.doesNotMatch(html, /show-trace/, 'no trace hint without a trace file');
     assert.match(await fs.readFile(path.join(out, 'summary.md'), 'utf8'), /# 未通过/);
+    assert.equal(await latestReportIndex(cwd), path.join(out, 'index.html'));
 });
+
+test(
+    'report opens the project latest and can still open a specific run',
+    { skip: process.platform === 'win32' },
+    async (t) => {
+        const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-report-cli-'));
+        t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+        const env = { ...process.env, LAYA_HOME: path.join(cwd, 'state'), PATH: cwd };
+        const report = (...args) => exec(process.execPath, [cli, 'report', ...args], { cwd, env });
+        await fs.writeFile(
+            path.join(cwd, process.platform === 'darwin' ? 'open' : 'xdg-open'),
+            '#!/bin/sh\nexit 0\n',
+            { mode: 0o700 },
+        );
+        await assert.rejects(report(), { code: 1, stderr: /No completed report/ });
+        await assert.rejects(report('first', 'second'), { code: 1, stderr: /report \[RUN_DIR\]/ });
+
+        const root = projectRunsDirectory(cwd);
+        const older = path.join(root, 'older');
+        const custom = path.join(cwd, 'custom report');
+        for (const out of [older, custom]) {
+            await fs.mkdir(out, { recursive: true });
+            await fs.writeFile(path.join(out, 'results.json'), JSON.stringify({ results: [] }));
+            await finalizeRun(out, cwd);
+        }
+        assert.ok((await report()).stdout.includes(path.join(custom, 'index.html')));
+        assert.ok(
+            (await report('runs/laya-pilot/older')).stdout.includes(path.join(older, 'index.html')),
+        );
+
+        await fs.rm(custom, { recursive: true });
+        assert.ok((await report()).stdout.includes(path.join(older, 'index.html')));
+        await fs.writeFile(path.join(root, 'latest.json'), 'incomplete');
+        assert.ok((await report()).stdout.includes(path.join(older, 'index.html')));
+    },
+);

@@ -4,6 +4,7 @@ import { CaseDirectories, slug } from './run-layout.mjs';
 import {
     eventLabel,
     HEALTH_EXPECTATIONS,
+    OPTIONAL_API_EXPECTATION,
     observePageErrors,
     safeText,
     safeUrl,
@@ -13,6 +14,7 @@ import { observe, target, settle, assertionTarget, discoverRowLabels } from './d
 import { waitForReady, readTables } from './readiness.mjs';
 import { configureControlBindings } from './control-bindings.mjs';
 import { expandStep, semanticStep, scopeNames, approvalOperation } from './planner.mjs';
+import { exactRecordRow, verifyExactRecord } from './exact-record.mjs';
 import {
     inspectCase,
     compileExpectation,
@@ -21,9 +23,10 @@ import {
 } from './case-diagnostics.mjs';
 const writeName =
     /(?:删除|移除|保存|提交|新增|创建|修改|编辑|上线|下线|授权|发布|导入|发送|支付|购买|确定|确认|应用|delete|remove|save|submit|create|edit|publish|send|pay|buy|import|confirm|apply)/i;
-const healthAssertions = new Map(
-    Object.entries(HEALTH_EXPECTATIONS).map(([kind, text]) => [text, kind]),
-);
+const healthAssertions = new Map([
+    ...Object.entries(HEALTH_EXPECTATIONS).map(([kind, text]) => [text, kind]),
+    [OPTIONAL_API_EXPECTATION, 'api'],
+]);
 
 function healthAssertion(text, health, completed, pageObserved) {
     const kind = healthAssertions.get(text);
@@ -39,6 +42,8 @@ function healthAssertion(text, health, completed, pageObserved) {
         return { text, kind, status: '未验证', reason: '未完成该项观察。' };
     if (health.truncated)
         return { text, kind, status: '未验证', reason: '错误事件已达到采集上限。' };
+    if (text === OPTIONAL_API_EXPECTATION && !health.apiRequests)
+        return { text, kind, status: '通过', reason: '本轮没有业务接口请求，未观察到请求失败。' };
     if (kind === 'api' && (!health.apiRequests || health.apiResponses < health.apiRequests))
         return {
             text,
@@ -177,10 +182,58 @@ export class Engine {
         if (!writeName.test(step))
             throw new Halt('动作与用例不符', '模型选择写入操作，但原始步骤没有对应写入意图。');
     }
-    async directClick(name, step, ordinal) {
-        if (!ordinal) await this.revealRowMenu(name);
-        const rowKey = ordinal ? undefined : await this.targetRow(name);
-        const found = await this.chooseTarget(name, 'click', { rowKey, ordinal });
+    async exactDialog() {
+        const dialog = this.page
+            .getByRole('dialog')
+            .or(this.page.getByRole('alertdialog'))
+            .filter({ visible: true });
+        if ((await dialog.count()) !== 1)
+            throw new Halt('弹窗操作范围不明确', '当前页面没有唯一可见的目标弹窗');
+        return dialog;
+    }
+    async directClick(name, step, ordinal, scope) {
+        let found;
+        if (scope === 'dialog' || this.exactRecord) {
+            let container;
+            let location;
+            if (this.exactRecord) {
+                if (ordinal || scope === 'dialog')
+                    throw new Halt('记录操作范围不明确', '按列定位后的第一步须在该记录中执行');
+                const { row, reason } = await exactRecordRow(this.page, this.exactRecord);
+                if (!row) throw new Halt('无法唯一定位记录', reason);
+                container = row;
+                location = '目标记录';
+            } else {
+                container = await this.exactDialog();
+                location = '目标弹窗';
+            }
+            const actual = this.config.labels?.[name] || name;
+            const options = { name: actual, exact: true };
+            const locator = container
+                .getByRole('button', options)
+                .or(container.getByRole('link', options))
+                .or(container.getByRole('menuitem', options))
+                .filter({ visible: true });
+            if ((await locator.count()) !== 1)
+                throw new Halt(
+                    (this.exactRecord ? '记录' : '弹窗') + '操作范围不明确',
+                    `${location}内无法唯一定位「${name}」`,
+                );
+            found = {
+                locator,
+                control: {
+                    name: actual,
+                    role: 'button',
+                    href: await locator.getAttribute('href', {
+                        timeout: this.config.assertTimeout || 4000,
+                    }),
+                },
+            };
+        } else {
+            if (!ordinal) await this.revealRowMenu(name);
+            const rowKey = ordinal ? undefined : await this.targetRow(name);
+            found = await this.chooseTarget(name, 'click', { rowKey, ordinal });
+        }
         this.guard(found.control, step);
         if (
             this.pendingPreconditions?.length &&
@@ -199,6 +252,7 @@ export class Engine {
         console.log('  Laya → ' + found.control.name + ' [' + found.control.role + ']');
         this.navFailureStart = this.failures.length;
         await found.locator.click();
+        this.exactRecord = null;
         await settle(this.page, this.config.delay);
         await this.ready();
         return found.control;
@@ -393,6 +447,14 @@ export class Engine {
     }
     async checkPrecondition(p, c) {
         if (/^(?:无|无特殊要求|none|n\/a)$/i.test(p)) return;
+        if (p === '本用例需要写入授权') {
+            if (!this.config.allowWrite)
+                throw new Halt(
+                    '写入未启用',
+                    '本用例包含业务写入，授权的测试环境请使用 --allow-write',
+                );
+            return;
+        }
         if (/^(?:用户)?已登录(?:系统)?[，,]?\s*$/i.test(p)) {
             if (
                 !this.config.authenticated ||
@@ -517,6 +579,19 @@ export class Engine {
             await this.bindRow(text);
             return;
         }
+        if (spec.verb === 'bindExactRecord') {
+            const { row, reason } = await exactRecordRow(this.page, spec);
+            if (!row) throw new Halt('无法唯一定位记录', reason);
+            this.exactRecord = spec;
+            this.rowKey = null;
+            this.events.push({
+                phase: this.phase,
+                action: 'bind-row',
+                text,
+                selection: 'exact-column',
+            });
+            return;
+        }
         if (spec.verb === 'assertStep') {
             const actual = await this.verify(spec.target);
             this.events.push({ phase: this.phase, action: 'step-assertion', text, ...actual });
@@ -608,7 +683,7 @@ export class Engine {
             await settle(this.page, this.config.delay);
         } else if (verb === 'click') {
             if (!this.rowKey && /列表(?:中)?点击/.test(text)) await this.bindRow(text);
-            control = await this.directClick(spec.target, text, spec.ordinal);
+            control = await this.directClick(spec.target, text, spec.ordinal, spec.scope);
         } else {
             if (['fill', 'clear', 'select', 'check', 'uncheck'].includes(verb)) {
                 const snap = await observe(this.page),
@@ -617,11 +692,28 @@ export class Engine {
                         .map((c) => c.name);
                 this.dirtyAreas.set(JSON.stringify(area), area);
             }
-            const found = await this.chooseTarget(spec.target, verb, {
-                value: spec.value,
-                rowKey: await this.targetRow(spec.target),
-                allowDisabled: verb === 'hover',
-            });
+            let found;
+            if (spec.scope === 'dialog') {
+                const dialog = await this.exactDialog();
+                const name = this.config.labels?.[spec.target] || spec.target;
+                const options = { name, exact: true };
+                const locator = dialog
+                    .getByRole('textbox', options)
+                    .or(dialog.getByRole('spinbutton', options))
+                    .or(dialog.getByLabel(name, { exact: true }))
+                    .or(dialog.getByPlaceholder(name, { exact: true }))
+                    .and(this.page.locator('input:not([type="hidden"],[type="password"]),textarea'))
+                    .filter({ visible: true });
+                if ((await locator.count()) !== 1)
+                    throw new Halt('弹窗操作范围不明确', `目标弹窗内无法唯一定位输入框「${name}」`);
+                found = { locator, control: { name, role: 'textbox', context: '弹窗' } };
+            } else {
+                found = await this.chooseTarget(spec.target, verb, {
+                    value: spec.value,
+                    rowKey: await this.targetRow(spec.target),
+                    allowDisabled: verb === 'hover',
+                });
+            }
             control = found.control;
             if (verb === 'fill' || verb === 'clear') {
                 await found.locator.fill(verb === 'clear' ? '' : spec.value);
@@ -713,6 +805,13 @@ export class Engine {
         }
         const spec = expectation(text),
             page = this.page;
+        if (spec.kind === 'exactRecord')
+            return {
+                text,
+                kind: spec.kind,
+                scope: '列表',
+                ...(await verifyExactRecord(page, spec, this.config.assertTimeout || 4000)),
+            };
         if (spec.kind === 'unsupported')
             return {
                 text,
@@ -918,6 +1017,7 @@ export class Engine {
         this.actions = 0;
         this.events = [];
         this.rowKey = null;
+        this.exactRecord = null;
         this.area = null;
         this.observedName = null;
         this.pendingPreconditions = [];
@@ -1020,6 +1120,7 @@ export class Engine {
                 this.phase = 'step';
                 this.area = area;
                 this.rowKey = null;
+                this.exactRecord = null;
                 if (area) {
                     await this.closeOverlay();
                     await this.showArea(area);

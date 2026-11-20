@@ -44,3 +44,24 @@ test('unsupported code or a nonrepresentable assertion cannot silently become a 
         /无法转换/,
     );
 });
+
+test('stray modifier keys are skipped, replayable keys become steps, others stay unsupported', () => {
+    const converted = recordedCase(
+        recording(`
+        await page.getByPlaceholder('请输入客户名称').fill('test');
+        await page.getByPlaceholder('请输入客户名称').press('CapsLock');
+        await page.getByPlaceholder('请输入客户名称').press('Enter');
+    `),
+    );
+    const steps = lines(converted.steps);
+    assert.equal(steps.length, 3);
+    assert.equal(steps[2], '按下 Enter');
+    // The Excel executor understands the converted key step.
+    assert.equal(describe(steps[2]).verb, 'press');
+    assert.deepEqual(converted.skipped, ['第 6 行按下 CapsLock（不影响页面）']);
+    assert.throws(
+        () => recordedCase(recording(`await page.getByPlaceholder('名称').press('Control+a');`)),
+        (error) =>
+            /第 4 行无法转换/.test(error.message) && /press\('Control\+a'\)/.test(error.message),
+    );
+});

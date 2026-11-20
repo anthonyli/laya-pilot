@@ -33,7 +33,7 @@ const recordingRows = [
     ['setup --recording', 'Install the test browser'],
     ['record URL', 'Save your actions as a test'],
     ['replay FILE', 'Run a saved test'],
-    ['report RUN_DIR', 'Open the HTML report'],
+    ['report', 'Open the latest HTML report'],
 ];
 
 export function printHome(version) {

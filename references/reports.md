@@ -32,7 +32,7 @@ runs/laya-pilot/2026-11-20_13-47-22/
 
 ## 先看 index.html
 
-打开方式：`laya report RUN_DIR`（skill 中为 `node scripts/run.mjs report RUN_DIR`），或直接双击 `index.html`。
+在执行测试的目录运行 `laya report` 打开最新报告，包括通过 `--out` 保存到其他目录的报告。用 `laya report RUN_DIR` 打开指定一轮，也可直接双击 `index.html`。Skill 入口使用 `node scripts/run.mjs report [RUN_DIR]`。
 
 页面最上方是**可靠性结论**，回答“这轮结果能不能信”：
 

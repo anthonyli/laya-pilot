@@ -5,6 +5,7 @@ export const HEALTH_EXPECTATIONS = {
     browser: '浏览器未出现脚本、控制台或崩溃错误',
     api: '接口请求成功，未出现 HTTP 错误或请求失败',
 };
+export const OPTIONAL_API_EXPECTATION = '未观察到接口请求失败';
 
 export function registerSecret(value) {
     if (typeof value === 'string' && value) secrets.add(value);

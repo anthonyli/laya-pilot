@@ -31,3 +31,4 @@ latest-run.json
 *.trace.zip
 test-results/
 playwright-report/
+/python/

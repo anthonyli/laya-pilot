@@ -29,7 +29,7 @@ LayaPilot 在浏览器里执行测试用例，输出测试报告和失败证据�
 
 两者参数相同：`laya X` 对应 `node scripts/run.mjs X`，`laya setup` 对应 `node scripts/setup.mjs`。
 
-**环境要求：** Node.js 20+（含 npm）。使用 Excel 相关功能还需要 Python 3.10+（含 venv 和 pip）。只录制和回放 Playwright 脚本时不需要 Python。
+**环境要求：** 只需要 Node.js 20+（含 npm）。Excel 功能用到的 Python 和浏览器由安装过程自动准备，见下文。
 
 ## 命令行快速开始
 
@@ -39,9 +39,16 @@ LayaPilot 在浏览器里执行测试用例，输出测试报告和失败证据�
 git clone https://github.com/anthonyli/laya-pilot.git
 cd laya-pilot
 npm install
-npm link            # 提示没有权限时改用 sudo npm link
-laya setup          # 安装 Chromium、Python 环境和 openpyxl，生成配置文件
+npm link            # 链接 laya 命令，并自动准备运行环境
 ```
+
+`npm link`（或 `npm install -g`）完成后会自动运行一次 `laya setup`：
+
+- **Python**：自动选用本机最新的 Python 3.10+；都没有时，下载一份只给 LayaPilot 用的独立 Python（约 25–70 MB）。系统自带的旧版本（如 macOS 的 3.9）会被跳过。
+- **浏览器**：优先使用本机已有的 Playwright Chromium、Chrome 或 Edge，都没有时才下载 Chromium。
+- 生成配置文件 `~/.laya/.env.local`。
+
+用 `sudo` 安装、在 CI 中，或设置了 `LAYA_SKIP_SETUP=1` 时不会自动执行，之后手动运行 `laya setup` 即可。网络中断等原因没装完也不影响安装本身，重新运行 `laya setup` 会复用已完成的步骤。需要指定 Python 时用 `laya setup --python python3.12`。
 
 配置、Python 环境和模型都放在 `~/.laya/`，重装 `laya` 不会丢失。需要换目录时设置环境变量 `LAYA_HOME`。
 
@@ -92,9 +99,9 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
 ```
 
-1. 在打开的浏览器里完成操作，用工具栏的断言按钮标记“应该看到什么”。
-2. 关闭浏览器后，会同时保存 `filter.xlsx`（自然语言用例，可直接编辑）和 `filter.spec.cjs`（原始 Playwright 脚本）。
-3. 回放 Excel：
+1. 在打开的浏览器里完成操作。Laya 根据操作前后的页面变化生成业务断言，也可用「添加检查点」手动标记要验证的内容。
+2. 点击「完成录制」或关闭浏览器，保存 `filter.xlsx`（拆分后的用例，可直接编辑）和 `filter.spec.cjs`（Playwright 脚本）。
+3. 回放 Excel，可加 `--cases REC-001` 单独执行一条用例。
 
 ```bash
 laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
@@ -159,7 +166,7 @@ cases/         每条用例一个目录，每一步都有截图，如 03-预期2
 logs/          过程文件，排查时再看
 ```
 
-打开报告：`laya report runs/laya-pilot/<日期_时间>`。页面顶部给出结论：**通过，证据完整** / **通过，但需要复核** / **未通过**，并列出原因，比如阻断、预期未验证、页面或接口报错、截图缺失。只看“通过 N 条”不足以判断结果是否可信，以这一栏为准。
+在执行测试的目录运行 `laya report`，即可打开最新一轮报告。用 `laya report RUN_DIR` 打开指定一轮。页面顶部给出结论：**通过，证据完整** / **通过，但需要复核** / **未通过**，并列出原因，比如阻断、预期未验证、页面或接口报错、截图缺失。只看“通过 N 条”不足以判断结果是否可信，以这一栏为准。
 
 - 生成的用例保存在 `generated-cases/`，只收录实际执行且断言通过的用例。
 - `--inspect` 通过只说明用例文件没问题，测试是否通过以页面断言为准。
