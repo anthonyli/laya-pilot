@@ -201,10 +201,11 @@ test('ordinary Excel CLI report scopes dialog button assertions', { timeout: 120
             }),
         );
         const inspection = JSON.parse(
-            await fs.readFile(path.join(output, 'excel-inspection.json'), 'utf8'),
+            await fs.readFile(path.join(output, 'logs/excel-inspection.json'), 'utf8'),
         );
-        const csv = await fs.readFile(path.join(output, '结果.csv'), 'utf8');
-        const markdown = await fs.readFile(path.join(output, '报告.md'), 'utf8');
+        const index = await fs.readFile(path.join(output, 'index.html'), 'utf8');
+        await fs.access(path.join(output, 'results.xlsx'));
+        const markdown = await fs.readFile(path.join(output, 'summary.md'), 'utf8');
         assert.equal(summary.workbookFormat, 'natural-language', stdout + stderr);
         assert.equal(summary.metrics.model_calls, 0, stdout + stderr);
         assert.equal(code === 0, false, stdout + stderr);
@@ -230,8 +231,8 @@ test('ordinary Excel CLI report scopes dialog button assertions', { timeout: 120
             assert.equal(result.assertions[0].scope, '弹窗', id);
             assert.equal(result.assertions[0].kind, 'controlVisible', id);
             assert.equal(result.status === '通过', assertionStatus === '通过', id);
-            assert.match(csv, new RegExp(title));
-            assert.match(csv, new RegExp(caseStatus));
+            assert.match(index, new RegExp(title));
+            assert.match(index, new RegExp(caseStatus));
             assert.match(markdown, new RegExp(`\\|${id}\\|${title}\\|${caseStatus}\\|`));
         }
         assert.match(byId['004'].assertions[0].reason, /找到 0 个/);

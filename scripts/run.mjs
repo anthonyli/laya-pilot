@@ -1,38 +1,54 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { safeText } from './lib/diagnostics.mjs';
-import { option, requireNode, skillRoot, resolveSkillSettings, skillVersion } from './common.mjs';
+import { printHome, printRunHelp } from './lib/cli-output.mjs';
+import { uniqueRunDirectory } from './lib/run-layout.mjs';
+import {
+    cmd,
+    isCli,
+    option,
+    requireNode,
+    skillRoot,
+    resolveSkillSettings,
+    skillVersion,
+} from './common.mjs';
 
 async function main() {
     requireNode();
-    const args = process.argv.slice(2);
-    if (args.includes('--version')) {
+    let args = process.argv.slice(2);
+    if (args[0] === 'help') {
+        if (args.length > 2) throw Error(`Usage: ${cmd('help [COMMAND]')}`);
+        args = args.length === 2 ? [args[1], '--help'] : [];
+    }
+    if (args[0] === 'replay' && args[1]?.toLowerCase().endsWith('.xlsx')) {
+        args = ['--excel', args[1], ...args.slice(2)];
+    }
+    if (['record', 'replay', 'report', 'export-excel'].includes(args[0])) {
+        const { runRecordingCommand } = await import('./lib/recording.mjs');
+        process.exitCode = await runRecordingCommand(args[0], args.slice(1));
+        return;
+    }
+    if (args[0] === 'setup' || args[0] === 'check') {
+        startScript(
+            'setup.mjs',
+            args[0] === 'check' ? ['--check', ...args.slice(1)] : args.slice(1),
+        );
+        return;
+    }
+    const explicitRun = args[0] === 'run';
+    if (explicitRun) args.shift();
+    if (args[0] === 'version' || args.includes('--version')) {
         const { version, contentHash } = skillVersion();
         console.log(JSON.stringify({ version, contentHash }));
         return;
     }
-    if (args.includes('--help')) {
-        console.log(`LayaPilot standalone skill — API model by default
-Setup: node scripts/setup.mjs [--python PATH] [--skip-browser]
-Check: node scripts/setup.mjs --check
-Regression: node scripts/run.mjs --excel FILE.xlsx --url URL --headless
-Inspect: node scripts/run.mjs --excel FILE.xlsx --inspect
-Offline draft: node scripts/run.mjs --mode plan --plan-source CASES.json [--out NEW_DIR]
-Review: node scripts/run.mjs --mode reviewed --review-plan draft-plan.json --inspect
-Approved execution: node scripts/run.mjs --mode reviewed --review-plan draft-plan.json --approved-hash SHA256
-Configuration: .env.local stores API access and optional login settings; pass the workbook and URL per task.
-Excel defaults to all imported cases, regardless of historical result or case type.
-Optional generation: node scripts/run.mjs --mode generate --url URL [--case-file FILE.xlsx]
-Excel auto-detects ordinary cases or generated structured plans; no extra execution mode is needed.
-Legacy compatibility: --mode execute --case-file FILE.xlsx [--url URL]
-Reports default to the current working directory under runs/laya-pilot/.
-API settings: LAYA_API_BASE, LAYA_API_MODEL, LAYA_API_KEY in the environment or skill .env.local.
-Configuration: the skill .env.local loads automatically; CLI options override it.
---provider local explicitly opts into local inference; setup.mjs --local-model installs and downloads weights.
-Options: --python PATH, --headless, --manual-login, --out DIR,
---auth-state FILE --auth-check CSS, --read-only, --operations LIST,
---data FILE, --control-bindings FILE (ordinary Excel only), --template-excel FILE, --allow-write (authorized writes for either Excel format).
-See references/setup.md and references/workflows.md for details.`);
+    if (args[0] && !args[0].startsWith('-'))
+        throw Error(`Unknown command: ${args[0]}. See ${cmd('--help')}.`);
+    if (!args.length || args.includes('--help') || args.includes('-h')) {
+        // The skill's primary job is Excel regression, so its help opens with that workflow.
+        const home = isCli && !explicitRun && args.every((arg) => arg === '--help' || arg === '-h');
+        if (home) printHome(skillVersion().version);
+        else printRunHelp(skillVersion().version);
         return;
     }
     if (option(args, '--mode') === 'plan') {
@@ -49,7 +65,7 @@ See references/setup.md and references/workflows.md for details.`);
     if (!args.includes('--python')) {
         const python = settings.python;
         if (python) args.push('--python', python);
-        else throw Error('Run node scripts/setup.mjs first, or supply --python.');
+        else throw Error(`Run ${cmd('setup')} first, or supply --python.`);
     }
     if (provider === 'local' && !args.includes('--model')) args.push('--model', settings.model);
     if (provider === 'api') {
@@ -58,9 +74,9 @@ See references/setup.md and references/workflows.md for details.`);
         if (!args.includes('--api-model')) args.push('--api-model', settings.apiModel);
     }
     {
-        const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid;
-        if (!args.includes('--out') && !process.env.TEST_OUTPUT)
-            args.push('--out', path.join(process.cwd(), 'runs', 'laya-pilot', id));
+        const out = uniqueRunDirectory(path.join(process.cwd(), 'runs', 'laya-pilot'));
+        const id = path.basename(out);
+        if (!args.includes('--out') && !process.env.TEST_OUTPUT) args.push('--out', out);
         if (
             option(args, '--mode') === 'generate' &&
             !args.includes('--case-file') &&
@@ -72,14 +88,13 @@ See references/setup.md and references/workflows.md for details.`);
             );
     }
     console.log('CONFIG ' + JSON.stringify(summary));
-    const child = spawn(
-        process.execPath,
-        [path.join(skillRoot, 'scripts', 'runner.mjs'), ...args],
-        {
-            stdio: 'inherit',
-            env: process.env,
-        },
-    );
+    startScript('runner.mjs', args);
+}
+
+function startScript(script, args) {
+    const child = spawn(process.execPath, [path.join(skillRoot, 'scripts', script), ...args], {
+        stdio: 'inherit',
+    });
     const signals = ['SIGINT', 'SIGTERM'];
     const handlers = signals.map((signal) => {
         const handler = () => child.kill(signal);

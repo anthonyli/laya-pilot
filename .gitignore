@@ -25,6 +25,7 @@ dist/
 /manifest.json
 runs/
 generated-cases/
+recorded-cases/
 validation/
 latest-run.json
 *.trace.zip

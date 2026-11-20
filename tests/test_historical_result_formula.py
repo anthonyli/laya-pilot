@@ -285,7 +285,7 @@ class HistoricalResultCliTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         summary = json.loads((output / 'results.json').read_text())
-        selection = json.loads((output / 'selection.json').read_text())
+        selection = json.loads((output / 'logs/selection.json').read_text())
         return summary, selection
 
     def assert_executed(self, result, source_result):

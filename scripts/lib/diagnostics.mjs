@@ -1,5 +1,10 @@
 const MAX_EVENTS = 60;
 const secrets = new Set();
+export const HEALTH_EXPECTATIONS = {
+    page: '页面未出现错误提示',
+    browser: '浏览器未出现脚本、控制台或崩溃错误',
+    api: '接口请求成功，未出现 HTTP 错误或请求失败',
+};
 
 export function registerSecret(value) {
     if (typeof value === 'string' && value) secrets.add(value);
@@ -61,21 +66,53 @@ export function safeText(value, limit = 500) {
 }
 
 export class BrowserDiagnostics {
-    constructor(context) {
+    constructor(context, { checkBusinessResponses = false } = {}) {
         this.active = null;
         this.requests = new WeakMap();
         context.on('request', (request) => {
-            if (this.active)
+            if (this.active) {
                 this.requests.set(request, { owner: this.active, step: this.active.step });
+                if (['xhr', 'fetch'].includes(request.resourceType())) this.active.apiRequests++;
+            }
         });
         context.on('response', (response) => {
             const request = response.request(),
                 kind = request.resourceType(),
                 status = response.status();
-            if (!['xhr', 'fetch'].includes(kind) || status < 400) return;
             const attribution = this.requests.get(request);
             if (!attribution || attribution.owner !== this.active) return;
             const owner = this.active;
+            if (['xhr', 'fetch'].includes(kind) && status >= 200 && status < 400) {
+                owner.apiResponses++;
+                if (
+                    checkBusinessResponses &&
+                    /json/i.test(response.headers()['content-type'] || '') &&
+                    owner.pending.length < MAX_EVENTS
+                ) {
+                    const pending = Promise.race([
+                        response.text(),
+                        new Promise((resolve) => setTimeout(() => resolve(''), 700)),
+                    ])
+                        .then((body) => {
+                            if (!body || body.length > 20000 || JSON.parse(body)?.success !== false)
+                                return;
+                            this.add(
+                                {
+                                    kind: 'api-body',
+                                    status,
+                                    url: safeUrl(response.url()),
+                                    method: request.method(),
+                                    detail: errorBodySummary(body) || '接口明确返回失败',
+                                    step: attribution.step,
+                                },
+                                owner,
+                            );
+                        })
+                        .catch(() => {});
+                    owner.pending.push(pending);
+                }
+            }
+            if (!['xhr', 'fetch', 'document'].includes(kind) || status < 400) return;
             const event = this.add({
                 kind: 'http',
                 status,
@@ -125,19 +162,23 @@ export class BrowserDiagnostics {
         });
         page.on('crash', () => this.add({ kind: 'crash', detail: '页面进程崩溃' }));
     }
-    add(event) {
-        if (!this.active || this.active.events.length >= MAX_EVENTS) return;
+    add(event, owner = this.active) {
+        if (!owner) return;
+        if (owner.events.length >= MAX_EVENTS) {
+            owner.truncated = true;
+            return;
+        }
         const saved = {
             time: new Date().toISOString(),
             ...event,
-            step: event.step ?? this.active.step ?? null,
+            step: event.step ?? owner.step ?? null,
         };
-        this.active.events.push(saved);
+        owner.events.push(saved);
         return saved;
     }
     begin(id) {
         if (this.active) throw Error('上一条用例的错误收集尚未结束');
-        this.active = { id, events: [], pending: [], step: null };
+        this.active = { id, events: [], pending: [], step: null, apiRequests: 0, apiResponses: 0 };
     }
     setStep(step) {
         if (this.active) this.active.step = step ? { ...step } : null;
@@ -151,15 +192,37 @@ export class BrowserDiagnostics {
     }
 }
 
+export async function observePageErrors(page) {
+    const selector =
+        '.ant-form-item-explain-error,.ant-message-error,.ant-notification-notice-error,.el-message--error,.el-form-item__error,[aria-invalid="true"]';
+    return page.locator(`${selector},[role="alert"]`).evaluateAll(
+        (elements, selector) =>
+            elements.flatMap((el) => {
+                const style = getComputedStyle(el);
+                if (!el.getClientRects().length || style.visibility !== 'visible') return [];
+                const text = (el.textContent || '').trim().slice(0, 300);
+                if (el.matches(selector))
+                    return [text || el.getAttribute('aria-label') || '表单字段无效'];
+                return /错误|失败|异常|无效|不可用|error|failed|invalid|unavailable/i.test(text)
+                    ? [text]
+                    : [];
+            }),
+        selector,
+    );
+}
+
 export function eventLabel(event) {
     if (event.kind === 'http')
         return `HTTP ${event.status} ${event.method} ${event.url}${event.detail ? '：' + event.detail : ''}`;
     if (event.kind === 'requestfailed')
         return `请求失败 ${event.method} ${event.url}：${event.detail}`;
+    if (event.kind === 'api-body')
+        return `接口返回失败 ${event.method} ${event.url}：${event.detail}`;
     if (event.kind === 'requestcancelled')
         return `请求取消 ${event.method} ${event.url}：${event.detail}`;
     if (event.kind === 'pageerror') return `前端异常：${event.detail}`;
     if (event.kind === 'crash') return '浏览器页面崩溃';
+    if (event.kind === 'ui-error') return `页面错误提示：${event.detail}`;
     return `控制台错误：${event.detail}`;
 }
 

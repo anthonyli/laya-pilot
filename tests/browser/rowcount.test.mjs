@@ -335,7 +335,7 @@ book.save(sys.argv[2])`,
             assert.equal(custom.status, '未验证');
             assert.equal(custom.actual, undefined);
             assert.match(custom.reason, /不能把未知结构当成0行/);
-            const report = await fs.readFile(path.join(output, '报告.md'), 'utf8');
+            const report = await fs.readFile(path.join(output, 'summary.md'), 'utf8');
             assert.match(report, /\|001\|非空ARIA表格不应被当成零记录\|失败\|/);
             assert.match(report, /\|002\|非空ARIA表格记录数为1\|通过\|/);
             assert.match(report, /\|003\|空ARIA表格记录数为0\|通过\|/);

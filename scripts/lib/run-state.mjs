@@ -36,7 +36,9 @@ export class RunJournal {
         const fd = fs.openSync(this.lock, 'wx', 0o600);
         fs.closeSync(fd);
         if (
-            ['checkpoint.json', 'results.json'].some((name) => fs.existsSync(path.join(out, name)))
+            ['logs/checkpoint.json', 'checkpoint.json', 'results.json'].some((name) =>
+                fs.existsSync(path.join(out, name)),
+            )
         ) {
             fs.unlinkSync(this.lock);
             throw Error('输出目录已有运行记录，请为 --out 指定新的目录');
@@ -59,11 +61,12 @@ export class RunJournal {
     }
     checkpoint(update = {}) {
         Object.assign(this.state, update, { updatedAt: new Date().toISOString() });
-        writePrivateJson(path.join(this.out, 'checkpoint.json'), this.state);
+        writePrivateJson(path.join(this.out, 'logs', 'checkpoint.json'), this.state);
     }
     event(type, details = {}) {
+        fs.mkdirSync(path.join(this.out, 'logs'), { recursive: true, mode: 0o700 });
         fs.appendFileSync(
-            path.join(this.out, 'progress.ndjson'),
+            path.join(this.out, 'logs', 'progress.ndjson'),
             JSON.stringify({ at: new Date().toISOString(), type, ...details }) + '\n',
             { mode: 0o600 },
         );

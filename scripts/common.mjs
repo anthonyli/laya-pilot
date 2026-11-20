@@ -1,17 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { loadLocalEnvironment } from './lib/project-config.mjs';
 import { safeText, safeUrl } from './lib/diagnostics.mjs';
 
-export const skillRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const venvPython = path.join(
-    skillRoot,
-    '.venv',
-    process.platform === 'win32' ? 'Scripts' : 'bin',
-    process.platform === 'win32' ? 'python.exe' : 'python',
-);
+import { cmd, codeRoot, dataRoot, isCli, venvPython } from './lib/entry.mjs';
+
+export { cmd, codeRoot, dataRoot, isCli, venvPython };
+/** Directory holding the shipped code and assets (the skill root for skill installs). */
+export const skillRoot = codeRoot;
 
 export function skillVersion() {
     const file = path.join(skillRoot, 'manifest.json');
@@ -25,10 +22,10 @@ export function skillVersion() {
 }
 
 export async function resolveSkillSettings(args, provider = option(args, '--provider') || 'api') {
-    const loaded = await loadLocalEnvironment(skillRoot);
+    const loaded = await loadLocalEnvironment(dataRoot);
     if (args.includes('--config'))
         throw Error(
-            'Use the skill .env.local for configuration; --config is no longer supported by the skill.',
+            `Use ${path.join(dataRoot, '.env.local')} for configuration; --config is no longer supported.`,
         );
     const sources = {};
     const value = (field, cli, env, fallback = '') => {
@@ -56,7 +53,7 @@ export async function resolveSkillSettings(args, provider = option(args, '--prov
             'model',
             '--model',
             'LAYA_MODEL',
-            path.join(skillRoot, 'models', 'laya-multilingual'),
+            path.join(dataRoot, 'models', 'laya-multilingual'),
         ),
         apiBase: value('apiBase', '--api-base', 'LAYA_API_BASE'),
         apiModel: value('apiModel', '--api-model', 'LAYA_API_MODEL', 'laya-decision'),
@@ -66,10 +63,11 @@ export async function resolveSkillSettings(args, provider = option(args, '--prov
     const version = skillVersion();
     const summary = {
         skillRoot,
+        dataRoot,
         version: version.version,
         contentHash: version.contentHash,
         cwd: process.cwd(),
-        envPath: path.join(skillRoot, '.env.local'),
+        envPath: path.join(dataRoot, '.env.local'),
         provider,
         python: safeText(settings.python, 1000),
         ...(provider === 'api'
@@ -103,7 +101,8 @@ export function requireNode() {
 }
 
 export function initializeConfig() {
-    const destination = path.join(skillRoot, '.env.local');
+    const destination = path.join(dataRoot, '.env.local');
+    fs.mkdirSync(dataRoot, { recursive: true });
     try {
         fs.copyFileSync(
             path.join(skillRoot, 'assets', '.env.example'),

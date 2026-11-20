@@ -81,8 +81,8 @@ class ExcelSelectionTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         return (
-            json.loads((output / 'selection.json').read_text()),
-            json.loads((output / 'excel-inspection.json').read_text()),
+            json.loads((output / 'logs/selection.json').read_text()),
+            json.loads((output / 'logs/excel-inspection.json').read_text()),
         )
 
     def test_all_rows_are_selected_regardless_of_result_and_case_type(self):

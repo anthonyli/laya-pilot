@@ -297,8 +297,8 @@ class ExcelInspectBoundaryTests(unittest.TestCase):
                     timeout=30,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-                selection = json.loads((output / 'selection.json').read_text())
-                inspection = json.loads((output / 'excel-inspection.json').read_text())
+                selection = json.loads((output / 'logs/selection.json').read_text())
+                inspection = json.loads((output / 'logs/excel-inspection.json').read_text())
                 self.assertEqual(selection['total'], 2)
                 self.assertEqual(selection['selected'], 2)
                 self.assertEqual(inspection['warnings'], [])

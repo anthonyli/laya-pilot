@@ -111,7 +111,7 @@ test(
             assert.equal(inspect.code, 0, inspect.stderr);
             assert.equal(hits, 0);
             const inspection = JSON.parse(
-                await fs.readFile(path.join(out, 'excel-inspection.json')),
+                await fs.readFile(path.join(out, 'logs/excel-inspection.json')),
             );
             assert.equal(
                 inspection.cases[0].diagnostics.find((d) => d.field === 'expected').code,
@@ -131,11 +131,11 @@ test(
             assert.equal(result.results[0].expected, rows[1][3]);
             assert.equal(result.results[3].assertions[0].assertions[1].status, '未验证');
             assert.match(
-                await fs.readFile(path.join(out, '报告.md'), 'utf8'),
+                await fs.readFile(path.join(out, 'summary.md'), 'utf8'),
                 /缺少可执行的业务判定依据/,
             );
             assert.match(
-                await fs.readFile(path.join(out, '结果.csv'), 'utf8'),
+                await fs.readFile(path.join(out, 'results.json'), 'utf8'),
                 /missing-test-value/,
             );
             assert.deepEqual(await fs.readFile(workbook), original);

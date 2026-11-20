@@ -1,28 +1,53 @@
 # LayaPilot · Browser Tests for Enterprise Admin Applications
 
-[中文](README.md) · [Workflow guide](references/workflows.md) · [Setup](references/setup.md) · [Architecture](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues) · [Changelog](references/changelog.md) · [Download skill](https://github.com/anthonyli/laya-pilot/releases/latest)
+[中文](README.md) · [Changelog](references/changelog.md) · [Download skill](https://github.com/anthonyli/laya-pilot/releases/latest) · [Workflow](docs/workflow.en.md) · [Workflow guide](references/workflows.md) · [Setup](references/setup.md) · [Reading reports](references/reports.md) · [Architecture](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
 
-Give an AI assistant your existing Excel test cases, execute their original steps and expected results in a browser, and get reports with failure evidence. LayaPilot focuses on admin tables, filters, forms, and CRUD operations. It can also generate new cases after executing and verifying them.
+LayaPilot runs test cases in a browser and produces reports with failure evidence. It targets the tables, filters, forms and CRUD pages of enterprise admin applications.
 
-**The repository root is a complete skill, with [SKILL.md](SKILL.md) as its entry point.** Use it through an AI assistant or invoke `scripts/run.mjs` directly. API access is the default; local inference is optional.
+![Public demo](docs/demo.png)
 
-## Quick start
+## What it does
 
-You need **Node.js 20+ with npm and Python 3.10+ with venv/pip**. API mode requires no GPU or local model weights. For local inference, follow [Use a local model](#use-a-local-model) instead of the API setup below.
+| Feature                    | Input                               | Output                                                   |
+| -------------------------- | ----------------------------------- | -------------------------------------------------------- |
+| **Regress existing Excel** | Your Excel cases + a page URL       | Per-case results, failed steps, screenshots and traces   |
+| **Record new cases**       | A page URL; you act in the browser  | An editable Excel case + the original Playwright script  |
+| **Generate from a page**   | A page URL + the allowed operations | New Excel cases that were executed and passed assertions |
 
-### 1. Install the skill
+During execution, the Laya decision model picks controls on the current page. The model is called through an **API** by default; the local model must be enabled explicitly. See the [workflow diagram](docs/workflow.en.md) for how the features fit together.
 
-Clone the complete repository into `laya-pilot/` under your AI tool's skill installation directory, or install the `laya-pilot/` directory from a distribution ZIP. Keep the complete directory structure; no build is required. From the installed skill directory, run:
+## Choose how to use it
+
+There are two ways to use LayaPilot. **They are installed separately and do not share configuration.** Pick one:
+
+|               | `laya` command                | AI skill                                                                     |
+| ------------- | ----------------------------- | ---------------------------------------------------------------------------- |
+| Best for      | Running cases yourself, CI    | Giving natural-language tasks in Cursor, Codex and similar tools             |
+| Install       | `npm link`, then `laya setup` | Place it in the AI tool's skill directory, then run `node scripts/setup.mjs` |
+| Configuration | `~/.laya/.env.local`          | `.env.local` in the skill directory                                          |
+| Commands      | `laya run …`                  | `node scripts/run.mjs …` (usually called by the AI)                          |
+
+The options are identical: `laya X` corresponds to `node scripts/run.mjs X`, and `laya setup` to `node scripts/setup.mjs`.
+
+**Requirements:** Node.js 20+ with npm. Excel features also need Python 3.10+ with venv and pip. Recording and replaying Playwright scripts only does not need Python.
+
+## Command-line quick start
+
+### 1. Install
 
 ```bash
-node scripts/setup.mjs
+git clone https://github.com/anthonyli/laya-pilot.git
+cd laya-pilot
+npm install
+npm link            # use sudo npm link if you lack permission
+laya setup          # installs Chromium, a Python venv and openpyxl, and creates the config file
 ```
 
-Setup installs Playwright, Chromium, and Python dependencies, then creates `.env.local` from the [configuration template](assets/.env.example). Existing configuration is preserved.
+Configuration, the Python environment and models live in `~/.laya/` and survive reinstalling `laya`. Set `LAYA_HOME` to use another directory.
 
-### 2. Configure API access and login
+### 2. Configure the API
 
-Fill in `.env.local` at the skill root:
+Edit `~/.laya/.env.local`:
 
 ```dotenv
 LAYA_API_BASE=https://your-gateway.example/v1
@@ -30,137 +55,157 @@ LAYA_API_MODEL=laya-decision
 LAYA_API_KEY=your-api-key
 ```
 
-Set the model name to one supported by your service. The endpoint must support HTTPS Chat Completions and return this project's candidate-decision JSON. Endpoint compatibility alone does not guarantee model compatibility; see the [API protocol](references/setup.md#api-协议).
+The endpoint must be HTTPS Chat Completions compatible and return the decision JSON this project expects; see the [API protocol](references/setup.md#api-协议). For automatic sign-in, add:
 
-Keep only persistent API and login settings in `.env.local`. Add login settings as needed:
+| Setting                              | Purpose                                               |
+| ------------------------------------ | ----------------------------------------------------- |
+| `TEST_USER`, `TEST_PASSWORD`         | Sign-in account and password                          |
+| `TEST_AUTH_STATE`, `TEST_AUTH_CHECK` | Reusable login state file and a signed-in page marker |
 
-| Settings                             | Purpose                                                                      |
-| ------------------------------------ | ---------------------------------------------------------------------------- |
-| `TEST_USER`, `TEST_PASSWORD`         | Credentials for automatic login                                              |
-| `TEST_AUTH_STATE`, `TEST_AUTH_CHECK` | Session file path and a unique authenticated-page marker; configure together |
+Pass the workbook path, page URL and output directory on each run instead of storing them. Never put keys or passwords on the command line.
 
-**Supply the workbook, target URL, operation scope, and output location with each task.** See [advanced options](references/setup.md#高级参数) when needed; they do not all belong in `.env.local`. Keep passwords, API keys, and session files out of Git, task prompts, and command lines.
+### 3. Check and run
 
 ```bash
-node scripts/setup.mjs --check
+laya check                                   # check dependencies and settings (does not contact the gateway)
+laya run --excel cases.xlsx --inspect        # check the workbook only, no browser
+laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
 ```
 
-This checks dependencies and configuration, not API connectivity. Run `node scripts/run.mjs --version` to inspect the installed version and content digest.
+Reports are written to `runs/laya-pilot/<run>/` in the current directory. All commands: `laya --help`.
 
-### 3. Ask the AI to run a task
+## Common tasks
 
-If you only provide a URL or say “test this page,” the AI first asks: **Generate new test cases, or execute an existing Excel workbook?** Generation explores the page and exports verified cases; execution requires a workbook or its path. If your intent is already clear, the AI does not ask again.
+### Regress an existing workbook
 
-In a tool supporting `$skill-name`, provide the workbook and target URL for this run:
+```bash
+laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
+```
+
+- Existing workbooks need no conversion. Without cases, copy the [Excel template](assets/test-cases-template.xlsx) and edit its examples following the [template guide](references/case-template.md).
+- All cases run by default. Steps and expectations are kept as written, and the input workbook is never modified.
+- Cases that create, edit or delete data need `--allow-write` in a test environment.
+
+### Record actions as a case
+
+```bash
+laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
+```
+
+1. Perform the workflow in the browser that opens, and use the toolbar's assertion buttons to mark what should appear.
+2. Closing the browser saves both `filter.xlsx` (an editable natural-language case) and `filter.spec.cjs` (the original Playwright script).
+3. Replay the Excel case:
+
+```bash
+laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
+```
+
+For Playwright scripts only, without Excel or a model:
+
+```bash
+laya setup --recording                       # install the browser only
+laya record 'https://your-test-app.example/customers' --code-only --out recorded-cases/filter.spec.cjs
+laya replay recorded-cases/filter.spec.cjs --out runs/filter-check
+laya report runs/filter-check                # open the HTML report
+```
+
+Recordings keep the values you type, so use test data. Convert an earlier recording with `laya export-excel FILE.spec.cjs`. See [Recording and replay](references/recording.md).
+
+### Generate cases from a page
+
+```bash
+laya run --mode generate --url 'https://your-test-app.example/module' --read-only
+```
+
+LayaPilot explores and executes the page, and exports only cases whose assertions passed, under `generated-cases/`. To review cases before execution, use the [review plan workflow](references/review-plan.md).
+
+### Use a local model
+
+```bash
+laya setup --local-model                     # installs dependencies and downloads weights; needs extra disk and memory
+laya run --provider local --excel cases.xlsx --url URL --headless
+```
+
+Pass `--provider local` on every run. Without it the API is always used; installing weights does not switch the default. See [local model setup](references/setup.md#仅在用户明确要求时本地模型).
+
+## Use as an AI skill
+
+1. Place the whole repository, or the `laya-pilot/` directory from the [Release ZIP](https://github.com/anthonyli/laya-pilot/releases/latest), in your AI tool's skill directory.
+2. Run `node scripts/setup.mjs` there, then fill in the API settings (same fields as above) in `.env.local` in that directory.
+
+The `laya` command is not needed. Then give tasks in natural language:
 
 ```text
-Use $laya-pilot to execute every case in /absolute/path/cases.xlsx.
-The target URL is https://your-test-app.example/module.
-Inspect parsing first, then run headlessly and provide reports and failure evidence.
+Use $laya-pilot to run every case in /absolute/path/cases.xlsx against https://your-test-app.example/module.
+Inspect the parse result first, then run headless and give me the report and failure evidence.
+
+Use $laya-pilot to generate read-only test cases for https://your-test-app.example/module.
+
+Use $laya-pilot to analyze /absolute/path/run/results.json and explain the failed steps.
 ```
 
-To generate new cases or analyze existing results:
+- Given only a URL, the AI first asks whether to generate cases or run an existing workbook.
+- Say "remember the login" and the AI saves the login state, then reuses it next time after verifying it.
+- Analyzing an existing report needs no dependencies or API settings.
+
+## Reports
+
+Each run creates `runs/laya-pilot/<date_time>/` in the current directory. Share the whole directory:
 
 ```text
-Use $laya-pilot to generate read-only cases for https://your-test-app.example/module.
-
-Use $laya-pilot to analyze /absolute/path/run/results.json and explain failed steps and causes.
+index.html     start here: reliability verdict, cases, a screenshot for every step
+summary.md     text report        results.json   machine-readable   results.xlsx   results table
+cases/         one directory per case with a screenshot for every step, e.g. 03-预期2-失败.png
+               (third capture, expectation 2, failed); cases that did not pass also keep trace.zip
+logs/          process files for troubleshooting
 ```
 
-Complete the first login manually or use configured credentials. Ask the AI to remember the session: it will configure a state file under `.auth/` and an authenticated-page marker, then validate and reuse that session on later runs. Expired sessions require login again. Analyzing an existing report requires no runtime installation or API configuration.
+Open it with `laya report runs/laya-pilot/<date_time>`. The top of the page gives the verdict: **passed with complete evidence**, **passed but needs review** or **failed**, with the reasons, such as blocked cases, unverified expectations, page or API errors, or missing screenshots. A pass count alone does not tell you whether the result can be trusted; read the verdict.
 
-## Run commands directly
+- Generated cases go to `generated-cases/` and include only cases that executed and passed assertions.
+- A passing `--inspect` only means the workbook is valid; page assertions decide whether a test passes.
+- Use `--out` for the report directory and `--case-file` for the generated workbook.
 
-If you need a case template, download the [Excel workbook with examples](assets/test-cases-template.xlsx) and follow the [filling guide](references/case-template.md), or ask the AI for a copy. It includes three clearly labeled demo cases for button visibility, customer search, and resetting a filter. Replace or remove them before running against your own application; example rows are not automatically skipped. The template has Chinese headers for case ID, name, preconditions, data, steps, and expected results. Existing workbooks need no conversion, and generating cases from a page does not require filling in a template first.
+See [reading reports](references/reports.md) (Chinese).
 
-Use the same installation and configuration above. Run these commands from the skill root, or use absolute script paths when working elsewhere.
+## Scope
 
-```bash
-# Inspect a workbook without starting a browser or model
-node scripts/run.mjs --excel '/absolute/path/cases.xlsx' --inspect
-
-# Execute existing or generated Excel cases
-node scripts/run.mjs --excel '/absolute/path/cases.xlsx' \
-  --url 'https://your-test-app.example/module' --headless
-
-# Generate read-only cases from a page
-node scripts/run.mjs --mode generate \
-  --url 'https://your-test-app.example/module' --read-only
-```
-
-Existing and generated cases share `--excel`, with automatic format detection. Input workbooks remain unchanged; new cases are generated only on request. Add `--allow-write` when executing authorized create, update, or delete cases. See the [workflow guide](references/workflows.md) for parameters and login options, or run `node scripts/run.mjs --help`.
-
-## Use a local model
-
-Local inference requires no API configuration and can reuse existing login settings. From the skill root, install dependencies and download the model:
-
-```bash
-node scripts/setup.mjs --local-model
-node scripts/setup.mjs --check --local-model
-```
-
-This downloads `convaiinnovations/laya-multilingual` to `models/laya-multilingual/`, requiring network access and additional disk space and memory. Select local mode explicitly on each run:
-
-```bash
-node scripts/run.mjs --provider local \
-  --excel '/absolute/path/cases.xlsx' \
-  --url 'https://your-test-app.example/module' --headless
-```
-
-For an existing compatible model, ensure local inference dependencies are installed and add `--model '/absolute/path/model'` to the run command. No model variables need to be added to `.env.local`. See [local model setup](references/setup.md#仅在用户明确要求时本地模型) for details. **Without `--provider local`, the skill uses the API; installing a model does not change the default.**
-
-## Reports and coverage
-
-Each run creates separate output under the caller's working directory by default:
-
-| Output                     | Default location and contents                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------- |
-| Regression reports         | `runs/laya-pilot/<run>/`: JSON, Markdown, and available browser evidence                          |
-| Workbook execution results | Ordinary cases also produce CSV; generation and structured execution also produce `执行结果.xlsx` |
-| Generated cases            | `generated-cases/laya-pilot-*.xlsx`, containing only cases executed with passing assertions       |
-
-Reports retain failures, blocked cases, and coverage gaps. Passing `--inspect` only means file validation succeeded; page assertions determine test results. Use `--out` for a report directory and `--case-file` for the generated workbook's output path.
-
-The current implementation uses Playwright and the Laya decision protocol, primarily covering admin tables, filters, forms, and CRUD. Read-only filter checks verify control visibility, not query results or reset behavior. Complex approvals, multi-account permissions, file imports, and Canvas require dedicated adapters. Follow planned work in [Issues](https://github.com/anthonyli/laya-pilot/issues).
+Coverage today focuses on admin tables, filters, forms and CRUD. Complex approvals, multi-account permissions, file imports and Canvas need dedicated support, tracked in [Issues](https://github.com/anthonyli/laya-pilot/issues).
 
 ## Try the demo
 
-Start the demo service from the skill root and open `http://127.0.0.1:8765/customers`:
-
 ```bash
-npm run demo
+npm run demo        # then open http://127.0.0.1:8765/customers
 ```
 
-The demo page and sample workbook are in [examples/](examples/). Give the AI `examples/demo-cases.xlsx` and the URL above to run tests within the workbook's scope.
+The demo page and cases are in [examples/](examples/); try `examples/demo-cases.xlsx` with the URL above. [Intro video](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
 
-![Public demo](docs/demo.png)
-
-[Introduction video](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
-
-## Project layout and maintenance
+## Development
 
 ```text
-SKILL.md       AI skill entry point
-scripts/       Setup, execution, demo, packaging, and runtime libraries
-references/    Setup and testing workflows
-assets/        Configuration and example Excel case templates
-examples/      Demo page and sample cases
-docs/          Architecture and technical notes
-tests/         Automated regression tests
+bin/           laya command entry
+scripts/       execution code (shared by the skill and the CLI), setup and packaging
+SKILL.md       AI skill entry
+references/    skill usage guides
+assets/        config template and Excel case template
+examples/      demo page and sample cases
+docs/          architecture and technical notes
+tests/         automated tests
 ```
-
-The repository maintains one copy of the runtime sources. To distribute the skill or upgrade an installation:
 
 ```bash
-python3 scripts/package_skill.py
-python3 scripts/package_skill.py --check
-python3 scripts/package_skill.py --install-to /absolute/path/installed-skill
+npm ci
+npm test && npm run test:browser && npm run format:check   # format check needs uv
 ```
 
-The delivery package contains only `SKILL.md`, runtime scripts, usage references, the configuration template, runtime dependency manifests, and the license. It excludes the demo, tests, GitHub configuration, READMEs, development tools, and the packaging script, as well as local configuration, authentication state, installed dependencies, and model weights. Its npm manifests retain only runtime dependencies and the start command; repository sources remain unchanged.
+Package the skill (creates `dist/laya-pilot-skill.zip`, without demo, tests, README or local configuration):
 
-Packaging creates `dist/laya-pilot-skill.zip` on demand. Git ignores `dist/`; do not commit delivery artifacts. Give recipients the complete extracted `laya-pilot/` directory and follow the installation steps above. `--check` compares an existing ZIP with current sources. Upgrades preserve `.env.local`, `.auth`, dependencies, and models. Afterwards, run `node scripts/setup.mjs` in the installation directory to refresh dependencies. Upgrades remove files listed in the previous manifest that are no longer distributed, including old demo files. Legacy files without a manifest are not automatically removed.
+```bash
+npm run skill:package
+npm run skill:check                                          # compare the ZIP with the sources
+python3 scripts/package_skill.py --install-to /path/to/installed-skill   # upgrade an installed copy, keeping its config and login state
+```
 
-For development, install dependencies with `npm ci`, then run `npm test`, `npm run test:browser`, and `npm run format:check`; formatting checks require `uv`. Python tests and additional verification steps are in the [runtime guide](docs/local-runtime.md).
+See the [runtime guide](docs/local-runtime.md) for more verification options.
 
-[MIT License](LICENSE). Laya, Playwright, and model weights have their own licenses.
+[MIT License](LICENSE). Laya, Playwright and model weights follow their own licenses.

@@ -93,12 +93,12 @@ class ExcelDispatchTests(unittest.TestCase):
 
     def test_generated_workbook_is_detected_and_inspected_without_a_model_or_browser(self):
         self.run_cli()
-        inspection = json.loads((self.output / 'excel-inspection.json').read_text())
-        selection = json.loads((self.output / 'selection.json').read_text())
+        inspection = json.loads((self.output / 'logs/excel-inspection.json').read_text())
+        selection = json.loads((self.output / 'logs/selection.json').read_text())
         self.assertEqual(inspection['workbookFormat'], 'structured')
         self.assertEqual(inspection['cases'][0]['id'], 'table')
         self.assertEqual(selection['selected'], 1)
-        self.assertFalse((self.output / 'trace.zip').exists())
+        self.assertFalse((self.output / 'trace/trace.zip').exists())
 
     def test_old_generated_workbook_without_a_marker_is_still_detected(self):
         book = load_workbook(self.workbook)
@@ -106,12 +106,12 @@ class ExcelDispatchTests(unittest.TestCase):
         book.save(self.workbook)
         book.close()
         self.run_cli()
-        inspection = json.loads((self.output / 'excel-inspection.json').read_text())
+        inspection = json.loads((self.output / 'logs/excel-inspection.json').read_text())
         self.assertEqual(inspection['workbookFormat'], 'structured')
 
     def test_api_inspection_requires_no_endpoint_model_or_key(self):
         self.run_cli(provider='api')
-        inspection = json.loads((self.output / 'excel-inspection.json').read_text())
+        inspection = json.loads((self.output / 'logs/excel-inspection.json').read_text())
         self.assertEqual(inspection['workbookFormat'], 'structured')
 
     def test_changed_visible_steps_fail_without_falling_back_to_natural_language(self):
@@ -121,10 +121,10 @@ class ExcelDispatchTests(unittest.TestCase):
         book.close()
         result = self.run_cli(expected=1)
         self.assertIn('与隐藏回放步骤不一致', result.stderr)
-        self.assertFalse((self.output / 'excel-inspection.json').exists())
+        self.assertFalse((self.output / 'logs/excel-inspection.json').exists())
         execution = self.run_cli(inspect=False, expected=1)
         self.assertIn('与隐藏回放步骤不一致', execution.stderr)
-        self.assertFalse((self.output / 'trace.zip').exists())
+        self.assertFalse((self.output / 'trace/trace.zip').exists())
 
     def test_appended_case_is_rejected_before_inspection_or_execution(self):
         book = load_workbook(self.workbook)
@@ -138,7 +138,7 @@ class ExcelDispatchTests(unittest.TestCase):
         for inspect in (True, False):
             result = self.run_cli(inspect=inspect, expected=1, provider='api')
             self.assertIn('工作表「生成用例」第3行', result.stderr)
-            self.assertFalse((self.output / 'trace.zip').exists())
+            self.assertFalse((self.output / 'trace/trace.zip').exists())
         self.assertEqual(hashlib.sha256(self.workbook.read_bytes()).hexdigest(), before)
 
     def test_formatted_empty_rows_are_ignored_but_extra_sheet_is_not(self):
@@ -162,7 +162,7 @@ class ExcelDispatchTests(unittest.TestCase):
         book.close()
         result = self.run_cli(expected=1)
         self.assertIn('没有隐藏的 Laya 回放步骤', result.stderr)
-        self.assertFalse((self.output / 'excel-inspection.json').exists())
+        self.assertFalse((self.output / 'logs/excel-inspection.json').exists())
 
     def test_structured_case_filter_is_rejected_instead_of_silently_running_everything(self):
         result = self.run_cli('--cases', '001', expected=1)
@@ -187,7 +187,7 @@ class ExcelDispatchTests(unittest.TestCase):
         self.write_workbook()
         result = self.run_cli(inspect=False, expected=1)
         self.assertIn('--allow-write', result.stderr)
-        self.assertFalse((self.output / 'trace.zip').exists())
+        self.assertFalse((self.output / 'trace/trace.zip').exists())
 
 
 if __name__ == '__main__':

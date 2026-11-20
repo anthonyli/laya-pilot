@@ -22,7 +22,7 @@ test(
             process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3',
             fileURLToPath(new URL('../scripts/worker.py', import.meta.url)),
             process.env.LAYA_TEST_MODEL || process.env.LAYA_MODEL,
-            path.join(out, 'decisions.ndjson'),
+            path.join(out, 'logs/decisions.ndjson'),
         );
         try {
             await laya.request({ action: 'load' });
@@ -65,7 +65,7 @@ test(
                 });
             }
             assert.ok(laya.records.every((r) => r.phase === 'replay-target' && !r.cache_hit));
-            console.log('Real model decisions: ' + path.join(out, 'decisions.ndjson'));
+            console.log('Real model decisions: ' + path.join(out, 'logs/decisions.ndjson'));
         } finally {
             laya.close();
         }

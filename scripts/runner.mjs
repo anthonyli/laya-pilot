@@ -8,7 +8,13 @@ import {
     saveAuthState,
     captureFailureScreenshot,
 } from './lib/auth-state.mjs';
-import { registerSecret, safeText, safeUrl } from './lib/diagnostics.mjs';
+import {
+    BrowserDiagnostics,
+    eventLabel,
+    registerSecret,
+    safeText,
+    safeUrl,
+} from './lib/diagnostics.mjs';
 import { openBrowser } from './lib/browser-provider.mjs';
 import {
     loadLocalEnvironment,
@@ -21,6 +27,10 @@ import { Engine } from './lib/engine.mjs';
 import { describe, expectation, lines } from './lib/language.mjs';
 import { validateControlBindings } from './lib/control-bindings.mjs';
 import { settle } from './lib/dom.mjs';
+import { dataRoot, venvPython } from './lib/entry.mjs';
+import { RUN_FILES, logFile, uniqueRunDirectory } from './lib/run-layout.mjs';
+import { finalizeRun, writeCaseWorkbook } from './lib/run-index.mjs';
+import { CaseTraces } from './lib/case-trace.mjs';
 import { inspectCase, compileExpectation } from './lib/case-diagnostics.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
     args = process.argv.slice(2);
@@ -31,7 +41,7 @@ const arg = (n, d) => {
     return args[i + 1];
 };
 const flag = (n) => args.includes(n);
-await loadLocalEnvironment(ROOT);
+await loadLocalEnvironment(dataRoot);
 const fileConfig = await loadProjectConfig(arg('--config', ''));
 const option = (cli, env, key, fallback) => configured(arg, cli, env, fileConfig[key], fallback);
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
@@ -39,7 +49,7 @@ const config = {
     url: option('--url', 'TEST_URL', 'url', ''),
     excel: option('--excel', 'TEST_EXCEL', 'excel', ''),
     user: option('--user', 'TEST_USER', 'user', ''),
-    python: option('--python', 'LAYA_PYTHON', 'python', path.join(ROOT, '.venv', 'bin', 'python')),
+    python: option('--python', 'LAYA_PYTHON', 'python', venvPython),
     model: option('--model', 'LAYA_MODEL', 'model', 'convaiinnovations/laya-multilingual'),
     provider: option('--provider', 'LAYA_PROVIDER', 'provider', 'local'),
     lazyModel: configuredFlag(args, '--lazy-model', 'LAYA_LAZY_MODEL', fileConfig.lazyModel),
@@ -81,7 +91,14 @@ const config = {
     cases: arg('--cases', '').split(',').filter(Boolean),
     data: arg('--data', '') ? {} : environmentData(fileConfig.data || {}),
     runId,
-    out: path.resolve(option('--out', 'TEST_OUTPUT', 'out', path.join(ROOT, 'runs', runId))),
+    out: path.resolve(
+        option(
+            '--out',
+            'TEST_OUTPUT',
+            'out',
+            uniqueRunDirectory(path.join(process.cwd(), 'runs', 'laya-pilot')),
+        ),
+    ),
 };
 async function secret(label = '登录密码', envName = 'TEST_PASSWORD') {
     if (process.env[envName]) return registerSecret(process.env[envName]);
@@ -116,11 +133,6 @@ async function secret(label = '登录密码', envName = 'TEST_PASSWORD') {
         process.stdin.on('data', on);
     });
 }
-function csv(v) {
-    let s = String(v ?? '');
-    if (/^[=+@\-\t\r]/.test(s)) s = "'" + s;
-    return '"' + s.replace(/"/g, '""') + '"';
-}
 async function report(results, laya, source, warnings) {
     const counts = {};
     for (const r of results) counts[r.status] = (counts[r.status] || 0) + 1;
@@ -128,6 +140,8 @@ async function report(results, laya, source, warnings) {
         times = actual.map((x) => x.inference_ms).sort((a, b) => a - b);
     const summary = {
         source,
+        input: path.basename(config.excel),
+        url: safeUrl(config.url),
         selection: config.selection,
         workbookFormat: 'natural-language',
         ...(config.reviewPlan ? { reviewPlan: config.reviewPlan } : {}),
@@ -150,48 +164,8 @@ async function report(results, laya, source, warnings) {
         },
         results,
     };
-    await fs.writeFile(path.join(config.out, 'results.json'), JSON.stringify(summary, null, 2));
-    const rows = [
-        [
-            '工作表',
-            '编号',
-            '用例',
-            '结果',
-            '原因分类',
-            '说明',
-            '完成动作数',
-            '通过断言数',
-            '断言总数',
-            '截图',
-            '截图采集说明',
-            '步骤与断言证据',
-            '用例可执行性诊断',
-            '未识别控件与绑定诊断',
-        ],
-        ...results.map((r) => [
-            r.sheet,
-            r.id,
-            r.title,
-            r.status,
-            r.category,
-            r.reason,
-            r.actions.length,
-            r.assertions.filter((a) => a.status === '通过').length,
-            r.assertions.length,
-            r.screenshot,
-            r.screenshot_error,
-            JSON.stringify(r.evidence || []),
-            JSON.stringify(r.input_diagnostics || []),
-            JSON.stringify({
-                controls: r.unidentified_controls || [],
-                bindings: r.control_binding_diagnostics || [],
-            }),
-        ]),
-    ];
-    await fs.writeFile(
-        path.join(config.out, '结果.csv'),
-        '\uFEFF' + rows.map((r) => r.map(csv).join(',')).join('\r\n'),
-    );
+    await fs.writeFile(path.join(config.out, RUN_FILES.results), JSON.stringify(summary, null, 2));
+    await writeCaseWorkbook(config.out, summary, config.python);
     const clean = (s) => String(s).replace(/[|\n\r]/g, ' ');
     let md = `# 通用版执行结果\n\n输入：${path.basename(config.excel)}；可见浏览器：${!config.headless}；推理来源：${config.provider}。\n\n${Object.entries(
         counts,
@@ -202,6 +176,17 @@ async function report(results, laya, source, warnings) {
         )}。通过要求步骤完整执行且全部预期有明确断言；跳过不计通过。\n\n|编号|用例|结果|原因|截图|\n|---|---|---|---|---|\n`;
     for (const r of results)
         md += `|${clean(r.id)}|${clean(r.title)}|${r.status}|${clean(r.reason)}${r.screenshot_error ? '；' + clean(r.screenshot_error) : ''}|${r.screenshot ? `[截图](${r.screenshot})` : ''}|\n`;
+    if (results.some((r) => r.health_checks?.length)) {
+        md += '\n## 执行环境与错误检查\n\n';
+        md += '|用例|观察项|状态|证据|\n|---|---|---|---|\n';
+        for (const r of results)
+            for (const check of r.health_checks || [])
+                md += `|${clean(r.id)}|${clean(check.text)}|${check.status}|${clean(check.reason)}|\n`;
+        for (const r of results)
+            for (const event of r.browser_events || [])
+                md += `\n- ${clean(r.id)}${event.step ? ` 第 ${event.step.index} 步` : ''} ${clean(eventLabel(event))}\n`;
+        md += `\n本次 Laya 模型实际调用 ${summary.metrics.model_calls} 次，缓存命中 ${summary.metrics.cache_hits} 次。\n`;
+    }
     md +=
         '\n## 步骤与断言证据\n\n每张图是对应步骤或断言结束时的页面快照；动作完成不等于业务断言通过。未完成步骤的图仅表示停止现场。\n';
     for (const r of results) {
@@ -211,26 +196,29 @@ async function report(results, laya, source, warnings) {
         for (const e of r.evidence)
             md += `|${e.sequence}|${e.phase === 'step' ? '步骤' : '预期'} ${e.index}|${clean(e.text)}|${clean(e.scope ?? '')}|${clean(e.status)}|${clean(e.at)}|${e.screenshot ? `[截图](${e.screenshot})` : clean(e.screenshot_error || '未采集')}|\n`;
     }
-    md += '\n## 用例可执行性诊断\n\n诊断保留原业务意图；语法可解释不代表页面或测试通过。\n';
+    const diagnosticsOf = (r) =>
+        (r.input_diagnostics || []).filter((d) => d.code !== 'needs-live-target');
+    if (results.some((r) => diagnosticsOf(r).length))
+        md += '\n## 用例可执行性诊断\n\n诊断保留原业务意图；语法可解释不代表页面或测试通过。\n';
     for (const r of results) {
-        for (const d of r.input_diagnostics || []) {
-            if (d.code === 'needs-live-target') continue;
+        for (const d of diagnosticsOf(r)) {
             md += `\n- ${clean(r.sheet)} 第${r.row}行 / ${clean(r.id)} / ${d.field} ${d.index}${d.clause ? ' 子句' + d.clause : ''}：${clean(d.text ?? '')}；${clean(d.message)}；${clean(d.suggestion)}\n`;
         }
     }
-    md +=
-        '\n## 未识别控件与绑定诊断\n\n已发现但无可靠语义的控件不能按位置猜测操作。下列信息对应每条用例结束时的页面，结合该用例截图复核。\n';
+    if (
+        results.some(
+            (r) => r.unidentified_controls?.length || r.control_binding_diagnostics?.length,
+        )
+    )
+        md +=
+            '\n## 未识别控件与绑定诊断\n\n已发现但无可靠语义的控件不能按位置猜测操作。下列信息对应每条用例结束时的页面，结合该用例目录中的截图和 controls.json 复核。\n';
     for (const r of results) {
         for (const c of r.unidentified_controls || [])
             md += `\n- ${clean(r.id)}：frame ${c.frame} / ${clean(c.tag)} / ${clean(c.role)} / id=${clean(c.elementId)} / 行=${clean(c.rowKey)} / 上下文=${clean(c.context)}；${clean(c.suggestion)}\n`;
         for (const d of r.control_binding_diagnostics || [])
             md += `\n- ${clean(r.id)}：绑定 ${clean(d.name)} / ${clean(d.selector)}：${clean(d.code)}，本次没有应用该绑定。\n`;
     }
-    await fs.writeFile(path.join(config.out, '报告.md'), md);
-    await fs.writeFile(
-        path.join(ROOT, 'latest-run.json'),
-        JSON.stringify({ directory: config.out, counts }, null, 2),
-    );
+    await fs.writeFile(path.join(config.out, RUN_FILES.summary), md);
     return summary;
 }
 let laya, browser, activePage;
@@ -327,7 +315,7 @@ async function main() {
         const { materializeReviewedPlan } = await import('./lib/review-plan.mjs');
         config.excel = await materializeReviewedPlan(review, config.python, config.out);
         await fs.writeFile(
-            path.join(config.out, 'review-plan-approval.json'),
+            logFile(config.out, 'review-plan-approval.json'),
             JSON.stringify(config.reviewPlan, null, 2),
         );
     }
@@ -361,11 +349,12 @@ async function main() {
             return;
         }
         const summary = await runWorkflow(config, workflowMode, secret, ROOT);
+        await finalizeRun(config.out);
         process.exitCode = summary.exitCode;
         return summary;
     }
     if (config.operations) throw Error('--operations 只适用于生成或带结构化计划的工作簿');
-    await fs.mkdir(path.join(config.out, 'evidence'), { recursive: true });
+    await fs.mkdir(config.out, { recursive: true });
     let apiKey =
         config.provider === 'api' && !config.dryRun
             ? await secret('API密钥', 'LAYA_API_KEY')
@@ -374,7 +363,7 @@ async function main() {
         config.python,
         path.join(ROOT, 'scripts', 'worker.py'),
         config.model,
-        path.join(config.out, 'decisions.ndjson'),
+        logFile(config.out, 'decisions.ndjson'),
         {
             provider: config.dryRun ? 'local' : config.provider,
             base: config.apiBase,
@@ -399,7 +388,7 @@ async function main() {
         excluded: [],
     };
     await fs.writeFile(
-        path.join(config.out, 'selection.json'),
+        logFile(config.out, 'selection.json'),
         JSON.stringify(config.selection, null, 2),
     );
     if (!selected.length) throw Error('没有匹配的用例编号，请检查 --cases 指定的范围');
@@ -420,7 +409,7 @@ async function main() {
         ...inspectCase(c, config.data),
     }));
     await fs.writeFile(
-        path.join(config.out, 'excel-inspection.json'),
+        logFile(config.out, 'excel-inspection.json'),
         JSON.stringify(
             { workbookFormat: 'natural-language', warnings: input.warnings, cases: inspection },
             null,
@@ -430,7 +419,7 @@ async function main() {
     console.log(`读取${input.cases.length}条，本轮${selected.length}条。`);
 
     if (config.dryRun) {
-        console.log('Excel检查结果：' + path.join(config.out, 'excel-inspection.json'));
+        console.log('Excel检查结果：' + logFile(config.out, 'excel-inspection.json'));
         if (config.reviewPlan) console.log('REVIEW_PLAN ' + JSON.stringify(config.reviewPlan));
         laya.close();
         return;
@@ -453,7 +442,12 @@ async function main() {
     const { browser: opened, context, page, authRestored } = await openBrowser(config);
     browser = opened;
     activePage = page;
-    const engine = new Engine(page, laya, config);
+    const engine = new Engine(
+        page,
+        laya,
+        config,
+        new BrowserDiagnostics(context, { checkBusinessResponses: true }),
+    );
     await engine.navigate(config.url);
     const authStatus = await ensureAuthentication(
         page,
@@ -465,8 +459,8 @@ async function main() {
     config.authenticated = authStatus !== 'not-required';
     await saveAuthState(context, page, config);
     await waitModelWarmup(modelWarmup);
-    // Never record login/password entry in Playwright traces.
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+    // Traces start per case, after login: never record login/password entry.
+    const traces = new CaseTraces(context, config.out);
     const results = [];
     // A login portal is not necessarily the module under test. Use only an
     // explicit, full menu path from the selected Excel, never an invented route.
@@ -484,7 +478,9 @@ async function main() {
     }
     for (const [index, c] of selected.entries()) {
         console.log('RUN ' + c.id + ' ' + c.title);
+        await traces.begin();
         const r = await engine.runCase(c);
+        await traces.end(r, r.evidence_dir);
         results.push(r);
         console.log(r.status + ' ' + c.id + ' ' + r.reason.slice(0, 170));
         await report(results, laya, input.cases.length, input.warnings);
@@ -512,8 +508,9 @@ async function main() {
             break;
         }
     }
-    await context.tracing.stop({ path: path.join(config.out, 'trace.zip') });
+    await traces.stop();
     const summary = await report(results, laya, input.cases.length, input.warnings);
+    await finalizeRun(config.out);
     console.log(
         'RESULT ' +
             JSON.stringify({
@@ -533,21 +530,36 @@ main().catch(async (e) => {
     const errorMessage = safeText(e.message, 1200);
     console.error('停止：' + errorMessage);
     await fs.mkdir(config.out, { recursive: true }).catch(() => {});
-    await fs
-        .writeFile(
-            path.join(config.out, '启动失败.json'),
-            JSON.stringify(
-                {
-                    category: e.category || '启动失败',
-                    message: errorMessage,
-                    url: activePage ? safeUrl(activePage.url()) : null,
-                },
-                null,
-                2,
-            ),
-        )
-        .catch(() => {});
-    await captureFailureScreenshot(activePage, path.join(config.out, '启动失败.png'));
+    const screenshot = 'run/startup-failure.png';
+    const captured = await captureFailureScreenshot(activePage, path.join(config.out, screenshot));
+    // Keep a results.json so readers and index.html can explain why nothing ran.
+    const hasResults = await fs.access(path.join(config.out, RUN_FILES.results)).then(
+        () => true,
+        () => false,
+    );
+    if (!hasResults)
+        await fs
+            .writeFile(
+                path.join(config.out, RUN_FILES.results),
+                JSON.stringify(
+                    {
+                        source: config.excel ? path.basename(config.excel) : null,
+                        runStatus: 'failed',
+                        error: {
+                            category: e.category || '启动失败',
+                            message: errorMessage,
+                            url: activePage ? safeUrl(activePage.url()) : null,
+                            screenshot: captured ? screenshot : null,
+                        },
+                        counts: {},
+                        results: [],
+                    },
+                    null,
+                    2,
+                ),
+            )
+            .catch(() => {});
+    await finalizeRun(config.out).catch(() => {});
     laya?.close();
     await browser?.close().catch(() => {});
     process.exitCode = e.exitCode || 1;

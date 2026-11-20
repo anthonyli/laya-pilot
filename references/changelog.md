@@ -1,5 +1,36 @@
 # 更新说明
 
+## 未发布
+
+### 新增
+
+- **独立的 `laya` 命令行**：`npm link` 后可在任意目录使用，配置、Python 环境和模型放在 `~/.laya/`（可用 `LAYA_HOME` 修改）。skill 与命令行各自安装，配置互不读取；skill 的帮助和提示只使用 `node scripts/*.mjs`。
+- **录制与回放**：`record`、`replay`、`export-excel`、`report`，详见[录制与回放](recording.md)。
+- **统一的报告目录**：每轮生成 `index.html`，顶部给出可靠性结论及原因，下面按用例列出每一步的状态和截图。详见[测试报告怎么看](reports.md)。
+- **按用例保存执行轨迹**：每条用例单独录制，只保留未通过用例的轨迹；保存失败时删除残缺文件并记录原因（此前中断时生成的整轮轨迹可能是残缺的）。
+- **结构化用例逐步截图**：生成和回放的每一步都保存截图，步骤用“点击「保存」”这类说明代替内部名称。
+
+### 兼容性
+
+产物目录结构有变化，读取旧路径的脚本需要更新：
+
+| 旧                                                                      | 新                                                                |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `runs/laya-pilot/2026-11-20T04-47-26-547Z-31256/`                       | `runs/laya-pilot/2026-11-20_12-47-26/`（本地时间）                |
+| `报告.md`                                                               | `summary.md`                                                      |
+| `结果.csv`                                                              | `results.xlsx`（普通 Excel，含用例表和步骤表）                    |
+| `执行结果.xlsx`                                                         | `results.xlsx`                                                    |
+| `evidence/case-<哈希>-N-M.png`、`evidence/<id>.png`                     | `cases/<序号>-<编号>-<名称>/NN-步骤或预期N-结果.png`、`final.png` |
+| `evidence/case-…-controls.json`                                         | `cases/<序号>-…/controls.json`                                    |
+| 整轮的 `trace.zip`                                                      | 每条未通过用例的 `cases/<序号>-…/trace.zip`；通过的用例不保留     |
+| `excel-inspection.json`、`selection.json`、`checkpoint.json` 等过程文件 | `logs/` 下同名文件                                                |
+| `启动浏览器事件.json`、`轨迹保存失败.json`                              | `logs/startup-browser-events.json`、`logs/trace-error.json`       |
+| `启动失败.json` / `启动失败.png`                                        | `results.json` 的 `error` 字段 / `run/startup-failure.png`        |
+| 录制回放的 `report/`、`artifacts/`                                      | `playwright-report/`、`cases/`                                    |
+| skill 目录下的 `latest-run.json`                                        | `runs/laya-pilot/latest.json`                                     |
+
+`results.json` 的已有字段保持不变，普通 Excel 用例新增 `evidence_dir`、`input`、`url`；用例可能新增 `trace` / `trace_error`；结构化用例的 `attempts` 每一步都有 `evidence`，并新增 `text` 说明。
+
 ## 0.1.1 — 2026-11-17
 
 本版包含用户反馈修复 #29–#32，重点改善普通 Excel 的执行证据、先审后执行流程、可执行性诊断及图标定位。版本号来自 `package.json`；分发包的 `manifest.json` 同时记录版本和内容摘要。

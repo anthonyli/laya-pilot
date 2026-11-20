@@ -221,12 +221,31 @@ async function cli(name, args, interruptOnWrite = false, extraEnv = {}) {
     assert.equal(signal, null, output);
     const summary = JSON.parse(await fs.readFile(path.join(directory, 'results.json'), 'utf8'));
     assert.equal(code, summary.exitCode, output);
-    if (summary.failureStage !== 'authentication')
-        assert.equal(
-            await fs.stat(path.join(directory, 'trace.zip')).then((x) => x.size > 0),
-            true,
-        );
-    else await assert.rejects(fs.access(path.join(directory, 'trace.zip')), { code: 'ENOENT' });
+    // Traces are per case: kept for cases someone must investigate, dropped for passes.
+    // Login is never traced, so an authentication failure leaves no trace at all.
+    await assert.rejects(fs.access(path.join(directory, 'trace/trace.zip')), { code: 'ENOENT' });
+    for (const r of summary.results) {
+        const passed = ['通过', '已验证', '不适用'].includes(r.status);
+        if (passed || summary.failureStage === 'authentication' || r.id === 'startup')
+            assert.equal(r.trace, undefined, `${r.id} ${r.status}`);
+        else if (r.trace_error)
+            // A failed save leaves no truncated file behind.
+            assert.equal(r.trace, undefined, r.id);
+        else if (!r.status.startsWith('未执行'))
+            assert.ok(
+                (await fs.stat(path.join(directory, r.trace))).size > 0,
+                `${r.id} ${r.status} keeps its trace`,
+            );
+        // Every executed step has its own screenshot, not only failures.
+        for (const attempt of r.attempts || [])
+            if (attempt.evidence)
+                assert.ok((await fs.stat(path.join(directory, attempt.evidence))).size > 0);
+        if (r.attempts?.some((a) => a.status === '通过'))
+            assert.ok(
+                r.attempts.some((a) => a.status === '通过' && a.evidence),
+                r.id,
+            );
+    }
     assert.equal(
         await fs.access(path.join(directory, '.run.lock')).then(
             () => true,
@@ -254,7 +273,7 @@ test(
         assert.ok(generated.summary.metrics.modelCalls > 0);
         assert.equal(await fs.stat(generated.summary.resultFile).then((x) => x.size > 0), true);
         const decisions = await fs.readFile(
-            path.join(generated.directory, 'decisions.ndjson'),
+            path.join(generated.directory, 'logs/decisions.ndjson'),
             'utf8',
         );
         assert.ok(decisions.includes('form-field'));
@@ -284,7 +303,7 @@ test(
         assert.ok(executed.summary.results.every((c) => c.status === '通过'));
         assert.ok(executed.summary.metrics.modelCalls > 0);
         const replayDecisions = await fs.readFile(
-            path.join(executed.directory, 'decisions.ndjson'),
+            path.join(executed.directory, 'logs/decisions.ndjson'),
             'utf8',
         );
         assert.ok(replayDecisions.includes('replay-target'));
@@ -421,7 +440,10 @@ test(
         ]);
         assert.equal(read.code, 0, read.output);
         assert.ok(read.summary.results.every((c) => ['table', 'filters'].includes(c.operation)));
-        const progress = await fs.readFile(path.join(read.directory, 'progress.ndjson'), 'utf8');
+        const progress = await fs.readFile(
+            path.join(read.directory, 'logs/progress.ndjson'),
+            'utf8',
+        );
         assert.ok(!progress.includes('write-intent'));
     },
 );
@@ -536,10 +558,10 @@ test(
         );
         assert.equal(result.summary.results[0].evidence, result.summary.runEvidence);
         const checkpoint = JSON.parse(
-            await fs.readFile(path.join(result.directory, 'checkpoint.json'), 'utf8'),
+            await fs.readFile(path.join(result.directory, 'logs/checkpoint.json'), 'utf8'),
         );
         assert.equal(checkpoint.results[0].status, '阻断');
-        const md = await fs.readFile(path.join(result.directory, '报告.md'), 'utf8');
+        const md = await fs.readFile(path.join(result.directory, 'summary.md'), 'utf8');
         assert.ok(!result.output.includes(password));
         assert.ok(!JSON.stringify(result.summary).includes(password));
         assert.ok(!md.includes(password));
@@ -613,7 +635,7 @@ test(
             result.summary.results.some((c) => c.operation === 'create' && c.status === '中断'),
         );
         const checkpoint = JSON.parse(
-            await fs.readFile(path.join(result.directory, 'checkpoint.json'), 'utf8'),
+            await fs.readFile(path.join(result.directory, 'logs/checkpoint.json'), 'utf8'),
         );
         assert.equal(checkpoint.status, 'interrupted');
         assert.equal(checkpoint.pendingWrite.operation, 'create');

@@ -1,3 +1,5 @@
+import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
+
 // General instruction grammar only. No case IDs, module names, routes or CSS selectors.
 export class Halt extends Error {
     constructor(category, message) {
@@ -82,6 +84,8 @@ export function describe(step) {
         };
     if ((m = step.match(/^(?:按下|press)\s*(Enter|Escape|Tab|ArrowDown|ArrowUp)$/i)))
         return { verb: 'press', value: m[1] };
+    if ((m = step.match(/^点击第\s*([1-9][0-9]{0,2}|1000)\s*个「([^」]+)」按钮$/)))
+        return { verb: 'click', target: m[2], ordinal: Number(m[1]) };
     if (/^(点击|单击|再点击|切换|选择|进入|打开|click\b|open\b|go to\b)/i.test(step)) {
         let target =
             q[0] ||
@@ -200,6 +204,10 @@ export function actionCriteria(spec) {
     );
 }
 export function expectation(text) {
+    const health = Object.entries(HEALTH_EXPECTATIONS).find(([, phrase]) => phrase === text);
+    if (health) return { kind: 'health', category: health[0] };
+    if (text === '录制设置的步骤预期全部满足') return { kind: 'recorded-checkpoints' };
+    if (text === '业务结果待补充（录制时未设置预期）') return { kind: 'business-expectation' };
     let m;
     const q = quoted(text);
     if ((m = text.match(/^[「“"](.+)[」”"]按钮(?:置灰不可点击|置灰|不可点击|不可用)$/)))

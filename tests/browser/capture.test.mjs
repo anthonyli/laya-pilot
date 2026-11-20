@@ -9,7 +9,6 @@ import { Engine } from '../../scripts/lib/engine.mjs';
 test('capture succeeds or records failure without using a stale screenshot', async () => {
     await fs.mkdir('runs', { recursive: true });
     const out = await fs.mkdtemp(path.resolve('runs/capture-'));
-    await fs.mkdir(path.join(out, 'evidence'));
     const server = http.createServer((req, res) => res.end('<button>CONTROL</button>'));
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const url = `http://127.0.0.1:${server.address().port}`;
@@ -62,7 +61,7 @@ test('capture succeeds or records failure without using a stale screenshot', asy
         assert.notEqual(attemptedPath, path.join(out, success.screenshot));
         assert.deepEqual(await fs.readFile(attemptedPath), old);
         const controls = JSON.parse(
-            await fs.readFile(attemptedPath.replace(/\.png$/, '-controls.json')),
+            await fs.readFile(path.join(path.dirname(attemptedPath), 'controls.json')),
         );
         assert.ok(controls.controls.some((c) => c.name === 'CONTROL'));
     } finally {

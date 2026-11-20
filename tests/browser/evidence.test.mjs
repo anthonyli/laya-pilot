@@ -16,7 +16,6 @@ test('evidence keeps distinct cases and unsafe names inside the evidence directo
     const base = `http://127.0.0.1:${server.address().port}`;
     const browser = await chromium.launch({ headless: true });
     try {
-        await fs.mkdir(path.join(out, 'evidence'));
         const page = await browser.newPage();
         const engine = new Engine(
             page,
@@ -59,11 +58,14 @@ test('evidence keeps distinct cases and unsafe names inside the evidence directo
                 data: '',
             });
             assert.equal(result.id, id);
-            assert.match(result.screenshot, /^evidence\/case-[a-f0-9]{64}-\d+\.png$/);
+            // One readable directory per case; unsafe ids never escape cases/.
+            assert.match(result.screenshot, /^cases\/\d{3}-[^/]+\/final\.png$/);
+            assert.ok(
+                path.resolve(out, result.screenshot).startsWith(path.join(out, 'cases') + path.sep),
+            );
+            assert.equal(result.evidence_dir, path.posix.dirname(result.screenshot));
             const controls = JSON.parse(
-                await fs.readFile(
-                    path.join(out, result.screenshot.replace('.png', '-controls.json')),
-                ),
+                await fs.readFile(path.join(out, result.evidence_dir, 'controls.json')),
             );
             assert.ok(controls.controls.some((c) => c.name === `CONTROL_${i}`));
             assert.ok((await fs.stat(path.join(out, result.screenshot))).size > 0);

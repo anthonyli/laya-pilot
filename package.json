@@ -8,6 +8,23 @@
         "node": ">=20"
     },
     "type": "module",
+    "bin": {
+        "laya": "bin/laya.mjs"
+    },
+    "files": [
+        "bin/laya.mjs",
+        "scripts/common.mjs",
+        "scripts/run.mjs",
+        "scripts/runner.mjs",
+        "scripts/setup.mjs",
+        "scripts/worker.py",
+        "scripts/lib/*.mjs",
+        "scripts/lib/*.py",
+        "requirements.txt",
+        "requirements-local.txt",
+        "assets/.env.example",
+        "assets/test-cases-template.xlsx"
+    ],
     "scripts": {
         "format": "npm run format:web && npm run format:python",
         "format:check": "npm run format:web:check && npm run format:python:check",
@@ -24,6 +41,7 @@
         "demo": "node scripts/demo-server.mjs"
     },
     "dependencies": {
+        "acorn": "8.15.0",
         "playwright": "1.62.1"
     },
     "devDependencies": {

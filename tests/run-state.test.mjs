@@ -75,12 +75,12 @@ test('checkpoint preserves active step and uncertain write before case completes
         journal = new RunJournal(out, { mode: 'generate' });
     const pendingWrite = { caseId: 'create', operation: 'create' };
     journal.checkpoint({ pendingWrite, activeCase: { id: 'create', steps: [{ kind: 'fill' }] } });
-    const snapshot = JSON.parse(fs.readFileSync(path.join(out, 'checkpoint.json')));
+    const snapshot = JSON.parse(fs.readFileSync(path.join(out, 'logs/checkpoint.json')));
     assert.deepEqual(snapshot.pendingWrite, pendingWrite);
     assert.equal(snapshot.activeCase.steps.length, 1);
     journal.completeCase({ id: 'create', status: '中断' }, { currentName: 'owned' });
     journal.finish({ results: journal.results, exitCode: 143 }, 'interrupted');
-    const final = JSON.parse(fs.readFileSync(path.join(out, 'checkpoint.json')));
+    const final = JSON.parse(fs.readFileSync(path.join(out, 'logs/checkpoint.json')));
     assert.equal(final.status, 'interrupted');
     assert.equal(final.results.length, 1);
     assert.deepEqual(final.pendingWrite, pendingWrite);

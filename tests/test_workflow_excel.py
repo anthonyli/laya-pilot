@@ -13,7 +13,7 @@ spec.loader.exec_module(excel)
 class WorkbookTests(unittest.TestCase):
     def test_generation_report_keeps_failed_and_skipped_cases(self):
         with tempfile.TemporaryDirectory(prefix='laya-report-') as directory:
-            output = str(Path(directory) / '执行结果.xlsx')
+            output = str(Path(directory) / 'results.xlsx')
             rows = [
                 {
                     'id': 'ok',

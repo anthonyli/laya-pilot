@@ -1,7 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
-import { safeText, safeUrl } from './diagnostics.mjs';
+import { CaseDirectories, slug } from './run-layout.mjs';
+import {
+    eventLabel,
+    HEALTH_EXPECTATIONS,
+    observePageErrors,
+    safeText,
+    safeUrl,
+} from './diagnostics.mjs';
 import { Halt, expectation, lines, variables, parseData, norm, quoted } from './language.mjs';
 import { observe, target, settle, assertionTarget, discoverRowLabels } from './dom.mjs';
 import { waitForReady, readTables } from './readiness.mjs';
@@ -15,6 +21,41 @@ import {
 } from './case-diagnostics.mjs';
 const writeName =
     /(?:删除|移除|保存|提交|新增|创建|修改|编辑|上线|下线|授权|发布|导入|发送|支付|购买|确定|确认|应用|delete|remove|save|submit|create|edit|publish|send|pay|buy|import|confirm|apply)/i;
+const healthAssertions = new Map(
+    Object.entries(HEALTH_EXPECTATIONS).map(([kind, text]) => [text, kind]),
+);
+
+function healthAssertion(text, health, completed, pageObserved) {
+    const kind = healthAssertions.get(text);
+    const matching = {
+        page: ['ui-error'],
+        browser: ['pageerror', 'console', 'crash'],
+        api: ['http', 'requestfailed', 'api-body'],
+    }[kind];
+    const events = health?.events.filter((event) => matching.includes(event.kind)) ?? [];
+    if (events.length)
+        return { text, kind, status: '失败', reason: events.map(eventLabel).join('；') };
+    if (!health || !completed || (kind === 'page' && !pageObserved))
+        return { text, kind, status: '未验证', reason: '未完成该项观察。' };
+    if (health.truncated)
+        return { text, kind, status: '未验证', reason: '错误事件已达到采集上限。' };
+    if (kind === 'api' && (!health.apiRequests || health.apiResponses < health.apiRequests))
+        return {
+            text,
+            kind,
+            status: '未验证',
+            reason: health.apiRequests ? '有接口请求未观察到成功响应。' : '本轮未观察到接口请求。',
+        };
+    return {
+        text,
+        kind,
+        status: '通过',
+        reason:
+            kind === 'api'
+                ? `观察到 ${health.apiResponses} 条成功响应，未发现请求错误。`
+                : '在已执行步骤中未检测到此类错误。',
+    };
+}
 
 // Shared by the wait and the final assertion. Native tables use tbody rows;
 // ARIA tables accepted by getByRole('table') use role=row. Header rows are not
@@ -86,10 +127,11 @@ async function readVisibleRowCount(page, expected, timeout) {
 }
 
 export class Engine {
-    constructor(page, laya, config) {
+    constructor(page, laya, config, diagnostics = null) {
         this.page = page;
         this.laya = laya;
         this.config = config;
+        this.diagnostics = diagnostics;
         configureControlBindings(page, config.controlBindings);
         this.events = [];
         this.actions = 0;
@@ -100,7 +142,7 @@ export class Engine {
         this.phase = 'setup';
         this.navFailureStart = 0;
         this.dirtyAreas = new Map();
-        this.evidenceOccurrences = new Map();
+        this.caseDirectories = new CaseDirectories();
         page.on('response', (r) => {
             if (r.status() >= 400) {
                 const u = new URL(r.url());
@@ -135,10 +177,10 @@ export class Engine {
         if (!writeName.test(step))
             throw new Halt('动作与用例不符', '模型选择写入操作，但原始步骤没有对应写入意图。');
     }
-    async directClick(name, step) {
-        await this.revealRowMenu(name);
-        const rowKey = await this.targetRow(name);
-        const found = await this.chooseTarget(name, 'click', { rowKey });
+    async directClick(name, step, ordinal) {
+        if (!ordinal) await this.revealRowMenu(name);
+        const rowKey = ordinal ? undefined : await this.targetRow(name);
+        const found = await this.chooseTarget(name, 'click', { rowKey, ordinal });
         this.guard(found.control, step);
         if (
             this.pendingPreconditions?.length &&
@@ -301,7 +343,7 @@ export class Engine {
         }
         throw new Halt('页面复位未完成', '存在未关闭弹窗，无法唯一确定取消/关闭按钮');
     }
-    async resetCase(url) {
+    async resetCase(url, { force = false } = {}) {
         this.phase = 'setup';
         const desired = new URL(url, this.config.url),
             current = new URL(this.page.url());
@@ -311,9 +353,9 @@ export class Engine {
             !desired.search &&
             !desired.hash;
         const changed =
-            sameModule && !this.config.reloadEachCase
+            sameModule && !this.config.reloadEachCase && !force
                 ? (await this.ready(), false)
-                : await this.navigate(url, { force: !!this.config.reloadEachCase });
+                : await this.navigate(url, { force: !!this.config.reloadEachCase || force });
         const key = new URL(url, this.config.url).href;
         if (!this.baselines.has(key)) {
             const snap = await observe(this.page);
@@ -566,7 +608,7 @@ export class Engine {
             await settle(this.page, this.config.delay);
         } else if (verb === 'click') {
             if (!this.rowKey && /列表(?:中)?点击/.test(text)) await this.bindRow(text);
-            control = await this.directClick(spec.target, text);
+            control = await this.directClick(spec.target, text, spec.ordinal);
         } else {
             if (['fill', 'clear', 'select', 'check', 'uncheck'].includes(verb)) {
                 const snap = await observe(this.page),
@@ -614,6 +656,24 @@ export class Engine {
         return event;
     }
     async verify(text) {
+        if (text === '录制设置的步骤预期全部满足') {
+            const assertions = this.events.filter((event) => event.action === 'step-assertion');
+            const passed =
+                assertions.length && assertions.every((entry) => entry.status === '通过');
+            return {
+                text,
+                kind: 'recorded-checkpoints',
+                status: passed ? '通过' : '未验证',
+                reason: passed ? '所有录制检查点均通过。' : '缺少已验证的录制检查点。',
+            };
+        }
+        if (text === '业务结果待补充（录制时未设置预期）')
+            return {
+                text,
+                kind: 'business-expectation',
+                status: '未验证',
+                reason: '原录制没有业务预期，请补充可观察结果。',
+            };
         const compiled = compileExpectation(text);
         if (compiled.length > 1) {
             const assertions = [];
@@ -864,7 +924,10 @@ export class Engine {
         const started = Date.now();
         const failuresAt = this.failures.length,
             navAt = this.navigationCount;
-        let touchedPage = false;
+        let touchedPage = false,
+            completed = false,
+            pageObserved = true,
+            healthExpected = [];
         const result = {
             ...c,
             status: '未执行',
@@ -876,11 +939,10 @@ export class Engine {
             input_diagnostics: inspectCase(c, this.config.data, this.config.runId).diagnostics,
             started_at: new Date().toISOString(),
         };
-        const identity = JSON.stringify([c.sheet ?? '', c.row ?? '', c.id ?? '']);
-        const digest = createHash('sha256').update(identity).digest('hex');
-        const occurrence = (this.evidenceOccurrences.get(digest) || 0) + 1;
-        this.evidenceOccurrences.set(digest, occurrence);
-        const stem = `case-${digest}-${occurrence}`;
+        // One readable directory per executed case: cases/001-ID-TITLE/.
+        const caseDir = this.caseDirectories.for(Symbol(), c.id, c.title);
+        result.evidence_dir = caseDir;
+        await fs.mkdir(path.join(this.config.out, caseDir), { recursive: true });
         const capture = async (details) => {
             const evidence = {
                 sequence: result.evidence.length + 1,
@@ -888,7 +950,10 @@ export class Engine {
                 at: new Date().toISOString(),
             };
             result.evidence.push(evidence);
-            const screenshot = `evidence/${stem}-${evidence.sequence}.png`;
+            const label = { step: '步骤', assertion: '预期' }[evidence.phase] || evidence.phase;
+            // e.g. 03-预期2-失败.png: order, phase and outcome are visible in the folder listing.
+            const outcome = evidence.status ? `-${slug(evidence.status, 8)}` : '';
+            const screenshot = `${caseDir}/${String(evidence.sequence).padStart(2, '0')}-${label}${evidence.index ?? ''}${outcome}.png`;
             try {
                 evidence.url = safeUrl(this.page.url());
                 const file = path.join(this.config.out, screenshot);
@@ -913,8 +978,10 @@ export class Engine {
                 preconditions = lines(variables(c.preconditions, data));
             if (!steps.length || !expected.length)
                 throw new Halt('用例内容缺失', '需要明确的操作步骤和预期结果');
+            healthExpected = expected.filter((text) => healthAssertions.has(text));
+            if (healthExpected.length) this.diagnostics?.begin(c.id);
             touchedPage = true;
-            await this.resetCase(c.url || this.config.url);
+            await this.resetCase(c.url || this.config.url, { force: healthExpected.length > 0 });
             this.phase = 'precondition';
             const scopeSnapshot = await observe(this.page);
             const titleAreas = scopeNames(
@@ -961,12 +1028,25 @@ export class Engine {
                 for (const [index, text] of steps.entries()) {
                     const firstEvent = this.events.length;
                     let status = '已完成';
+                    if (healthExpected.length)
+                        this.diagnostics?.setStep({ index: index + 1, text });
                     try {
                         await this.step(text);
                     } catch (error) {
                         status = '未完成';
                         throw error;
                     } finally {
+                        if (healthExpected.length && this.diagnostics) {
+                            try {
+                                for (const detail of new Set(await observePageErrors(this.page)))
+                                    this.diagnostics.add({
+                                        kind: 'ui-error',
+                                        detail: safeText(detail),
+                                    });
+                            } catch {
+                                pageObserved = false;
+                            }
+                        }
                         const sequence = await capture({
                             phase: 'step',
                             index: index + 1,
@@ -980,6 +1060,7 @@ export class Engine {
                 }
                 this.phase = 'assertion';
                 for (const [index, text] of expected.entries()) {
+                    if (healthAssertions.has(text)) continue;
                     let assertion;
                     try {
                         assertion = await this.verify(text);
@@ -1009,6 +1090,35 @@ export class Engine {
                     status: '未验证',
                     reason: '已继续执行可观察步骤，但该前提仍缺少证据，不能计为通过',
                 });
+            completed = true;
+        } catch (e) {
+            result.status = this.events.some(
+                (x) => x.phase === 'step' && x.action !== 'already-on-page',
+            )
+                ? '部分执行（未完成）'
+                : '跳过（未完成）';
+            result.category = e.category || '执行器异常';
+            result.reason = e.message;
+        }
+        if (healthExpected.length) {
+            const monitored = this.diagnostics?.active;
+            if (monitored && completed) await this.page.waitForTimeout(150).catch(() => {});
+            if (monitored) result.browser_events = await this.diagnostics.end();
+            result.health_checks = healthExpected.map((text) =>
+                healthAssertion(text, monitored, completed, pageObserved),
+            );
+            result.assertions.push(...result.health_checks);
+            if (!completed && result.health_checks.some((check) => check.status === '失败')) {
+                result.status = '失败';
+                result.reason +=
+                    '；' +
+                    result.health_checks
+                        .filter((check) => check.status === '失败')
+                        .map((check) => check.reason)
+                        .join('；');
+            }
+        }
+        if (completed) {
             result.status = result.assertions.some((a) => a.status === '失败')
                 ? '失败'
                 : result.assertions.some((a) => a.status === '未验证')
@@ -1025,14 +1135,6 @@ export class Engine {
                     .filter((a) => a.status !== '通过')
                     .map((a) => a.text + '：' + a.reason)
                     .join('；') || '所有步骤已执行，所有预期断言通过';
-        } catch (e) {
-            result.status = this.events.some(
-                (x) => x.phase === 'step' && x.action !== 'already-on-page',
-            )
-                ? '部分执行（未完成）'
-                : '跳过（未完成）';
-            result.category = e.category || '执行器异常';
-            result.reason = e.message;
         }
         result.actions = this.events;
         result.duration_ms = Date.now() - started;
@@ -1058,7 +1160,7 @@ export class Engine {
             result.reason += '；页面未就绪且捕获HTTP5xx，不能据此判定产品功能错误';
         }
         if (touchedPage) {
-            const screenshot = 'evidence/' + stem + '.png';
+            const screenshot = `${caseDir}/final.png`;
             try {
                 await this.page.screenshot({ path: path.join(this.config.out, screenshot) });
                 result.screenshot = screenshot;
@@ -1069,7 +1171,7 @@ export class Engine {
             result.unidentified_controls = snap.unidentifiedControls;
             result.control_binding_diagnostics = snap.bindingDiagnostics;
             await fs.writeFile(
-                path.join(this.config.out, 'evidence', stem + '-controls.json'),
+                path.join(this.config.out, caseDir, 'controls.json'),
                 JSON.stringify(
                     {
                         url: snap.url,

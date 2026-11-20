@@ -281,23 +281,19 @@ test(
                 assert.equal(summary.results[0].unidentified_controls.length, bound ? 0 : 1);
                 const evidence = JSON.parse(
                     await fs.readFile(
-                        path.join(
-                            out,
-                            summary.results[0].screenshot.replace('.png', '-controls.json'),
-                        ),
+                        path.join(out, summary.results[0].evidence_dir, 'controls.json'),
                         'utf8',
                     ),
                 );
                 if (bound) assert.equal(evidence.controls[0].name, '导出');
                 else assert.equal(evidence.unidentifiedControls[0].elementId, 'unknown');
-                assert.match(
-                    await fs.readFile(path.join(out, '报告.md'), 'utf8'),
-                    /未识别控件与绑定诊断/,
-                );
-                assert.match(
-                    await fs.readFile(path.join(out, '结果.csv'), 'utf8'),
-                    /未识别控件与绑定诊断/,
-                );
+                // The section is written only when there is something to diagnose.
+                const markdown = await fs.readFile(path.join(out, 'summary.md'), 'utf8');
+                const diagnosed =
+                    summary.results[0].unidentified_controls.length > 0 ||
+                    summary.results[0].control_binding_diagnostics.length > 0;
+                assert.equal(markdown.includes('未识别控件与绑定诊断'), diagnosed);
+                await fs.access(path.join(out, 'results.xlsx'));
             }
             assert.deepEqual(await fs.readFile(workbook), before);
         } finally {

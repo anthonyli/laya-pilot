@@ -1,6 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import { PendingWrites } from './pending-writes.mjs';
 import fs from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { CaseDirectories, RUN_FILES, logFile, slug } from './run-layout.mjs';
+import { CaseTraces } from './case-trace.mjs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -71,6 +74,50 @@ const safeKey = (s) =>
         .replace(/[^a-z0-9_-]/gi, '-')
         .replace(/-+/g, '-')
         .slice(0, 85);
+// Human-readable step descriptions for reports: "点击「保存」" rather than "click".
+const STEP_VERBS = {
+    click: '点击',
+    fill: '输入',
+    'form-fill': '填写',
+    'form-fill-required': '填写必填项',
+    'form-select': '选择',
+    'form-date': '选择日期',
+    select: '选择',
+    date: '选择日期',
+    reload: '刷新页面',
+    'assert-row': '核对列表包含',
+    'assert-absent': '核对列表不包含',
+    'assert-headers': '核对列头',
+    'assert-control': '核对控件可见',
+    'assert-text': '核对文字',
+    'assert-disabled': '核对不可用',
+    'assert-selected': '核对已选中',
+    'assert-form-errors': '核对表单校验提示',
+    'assert-input-invalid': '核对输入无效',
+    'assert-discovery': '核对',
+};
+const OPERATION_LABELS = {
+    clickCreate: '点击新增',
+    formFill: '填写表单',
+    field: '定位字段',
+    row: '核对列表行',
+    assertHeaders: '核对列头',
+    replayStep: '回放步骤',
+    reload: '刷新页面',
+    click: '点击',
+    fill: '输入',
+};
+function describeStep(step, variables = {}) {
+    const resolve = (v) =>
+        String(v ?? '').replace(/\$\{(\w+)\}/g, (m, name) => variables[name] ?? m);
+    const verb = STEP_VERBS[step.kind] || step.kind;
+    const target = step.target?.name || step.target?.label || '';
+    const value = Array.isArray(step.value) ? step.value.join('、') : step.value;
+    const parts = [verb];
+    if (target) parts.push(`「${resolve(target)}」`);
+    if (value != null && value !== '') parts.push(`${target ? '为 ' : ''}「${resolve(value)}」`);
+    return parts.join(' ');
+}
 const ownName = () => `LayaAuto_${Date.now().toString(36)}_${randomBytes(3).toString('hex')}`;
 const controlInfo = (c) => ({ name: c.name, role: c.role, scope: c.scope || 'page' });
 const message = (e) => safeText(e?.message || String(e), 1200);
@@ -223,6 +270,32 @@ export function validateWorkflow(file) {
 }
 
 export class Workflow {
+    /** The case's own cases/NNN-ID-TITLE/ directory, created on first use. */
+    evidenceDirectory(c) {
+        const directory = this.caseDirectories.for(c, c.id, c.title);
+        mkdirSync(path.join(this.config.out, directory), { recursive: true });
+        return directory;
+    }
+    evidencePath(c, name) {
+        return `${this.evidenceDirectory(c)}/${name}`;
+    }
+    /** Screenshot after each logical step: 03-第3步-click-保存-通过.png, numbered like the steps. */
+    async captureStep(entry, group, recorded = []) {
+        const step = this.case.failedStep;
+        entry.text = step
+            ? `第${step.number}步 ${STEP_VERBS[step.action] || step.action}${step.target ? `「${step.target}」` : ''}`
+            : recorded.length
+              ? recorded.map((r) => describeStep(r, this.variables)).join('；')
+              : OPERATION_LABELS[entry.step] || entry.step;
+        const retry = entry.attempt > 1 || entry.status !== '通过' ? `-第${entry.attempt}次` : '';
+        const name = `${String(group).padStart(2, '0')}-${slug(entry.text.replace(/[「」]/g, ''), 30)}${retry}-${entry.status}.png`;
+        entry.evidence = this.evidencePath(this.case, name);
+        await this.page
+            .screenshot({ path: path.join(this.config.out, entry.evidence), timeout: 5000 })
+            .catch(() => {
+                entry.evidence = '';
+            });
+    }
     constructor(page, laya, config, mode, diagnostics) {
         this.page = page;
         this.laya = laya;
@@ -238,6 +311,7 @@ export class Workflow {
         this.currentName = this.variables.recordName;
         this.pendingWrites = new PendingWrites(page);
         this.startUrl = page.url();
+        this.caseDirectories = new CaseDirectories();
         this.journal = config.journal;
         this.allowed = workflowPolicy(config);
         this.results = [];
@@ -350,7 +424,7 @@ export class Workflow {
         // retry observations only: a timeout is not proof that a write failed.
         if (['save', 'delete', 'confirm'].includes(step.purpose)) {
             if (this.pendingWrite && this.pendingWrite.caseId !== this.case?.id)
-                throw Error('前序用例有未确认写入，停止后续写入，请核对 checkpoint.json');
+                throw Error('前序用例有未确认写入，停止后续写入，请核对 logs/checkpoint.json');
             await locator.click({ trial: true, timeout: 4000 });
             this.pendingWrite = { caseId: this.case?.id, operation: this.case?.operation, step };
             this.journal?.event('write-intent', this.pendingWrite);
@@ -402,6 +476,7 @@ export class Workflow {
         const state = { write: null };
         this.attemptState = state;
         const group = (this.case?.attempts?.length || 0) + 1;
+        const recordedBefore = this.case?.steps?.length ?? 0;
         try {
             for (let attempt = 1; attempt <= 3; attempt++) {
                 this.checkInterrupted();
@@ -415,6 +490,12 @@ export class Workflow {
                         if (!this.case?.steps.includes(state.write)) this.record(state.write);
                         result = state.write;
                     } else result = await operation();
+                    if (this.case)
+                        await this.captureStep(
+                            entry,
+                            group,
+                            this.case.steps?.slice(recordedBefore),
+                        );
                     this.case?.attempts?.push(entry);
                     return result;
                 } catch (error) {
@@ -422,15 +503,11 @@ export class Workflow {
                     entry.status = '失败';
                     entry.reason = message(error);
                     if (this.case) {
-                        entry.evidence = `evidence/${safeKey(this.case.id)}-step-${group}-attempt-${attempt}.png`;
-                        await this.page
-                            .screenshot({
-                                path: path.join(this.config.out, entry.evidence),
-                                timeout: 5000,
-                            })
-                            .catch(() => {
-                                entry.evidence = '';
-                            });
+                        await this.captureStep(
+                            entry,
+                            group,
+                            this.case.steps?.slice(recordedBefore),
+                        );
                         this.case.attempts ??= [];
                         this.case.attempts.push(entry);
                     }
@@ -1099,6 +1176,7 @@ export class Workflow {
             attempts: [],
         };
         this.case = c;
+        await this.traces?.begin();
         this.diagnostics.begin(id);
         this.journal?.checkpoint({ activeCase: c, runtime: this.runtime() });
         try {
@@ -1111,7 +1189,7 @@ export class Workflow {
             c.reason = message(e);
         }
         // Capture evidence before closing any remaining form for the next case.
-        c.evidence = `evidence/${id}.png`;
+        c.evidence = this.evidencePath(c, 'final.png');
         await this.page
             .screenshot({ path: path.join(this.config.out, c.evidence), timeout: 5000 })
             .catch(() => {
@@ -1133,6 +1211,8 @@ export class Workflow {
         }
         if (c.status === '已验证' && this.pendingWrite?.caseId === c.id) this.pendingWrite = null;
         this.journal?.checkpoint({ pendingWrite: this.pendingWrite });
+        // Decide on the trace only once the status is final (browser events can fail a pass).
+        await this.traces?.end(c, this.evidenceDirectory(c));
         c.durationMs = Math.round(performance.now() - started);
         this.case = null;
         return c;
@@ -1462,6 +1542,7 @@ export class Workflow {
                 attempts: [],
             };
             this.case = c;
+            await this.traces?.begin();
             this.diagnostics.begin(c.id);
             this.journal?.checkpoint({ activeCase: c, runtime: this.runtime() });
             if (
@@ -1491,7 +1572,7 @@ export class Workflow {
                     c.status = '失败';
                     c.reason = message(e);
                 }
-            c.evidence = `evidence/${c.id}.png`;
+            c.evidence = this.evidencePath(c, 'final.png');
             await this.page
                 .screenshot({ path: path.join(this.config.out, c.evidence), timeout: 5000 })
                 .catch(() => {
@@ -1531,6 +1612,7 @@ export class Workflow {
                 if (saved.operation === 'delete') this.created = false;
             }
             this.journal?.checkpoint({ pendingWrite: this.pendingWrite });
+            await this.traces?.end(c, this.evidenceDirectory(c));
             c.durationMs = Math.round(performance.now() - started);
             this.case = null;
             this.completeCase(c);
@@ -1560,9 +1642,9 @@ export async function inspectReplay(config) {
         excluded: [],
     };
     await fs.mkdir(config.out, { recursive: true });
-    await fs.writeFile(path.join(config.out, 'selection.json'), JSON.stringify(selection, null, 2));
+    await fs.writeFile(logFile(config.out, 'selection.json'), JSON.stringify(selection, null, 2));
     await fs.writeFile(
-        path.join(config.out, 'excel-inspection.json'),
+        logFile(config.out, 'excel-inspection.json'),
         JSON.stringify(
             {
                 workbookFormat: 'structured',
@@ -1575,7 +1657,7 @@ export async function inspectReplay(config) {
         ),
     );
     console.log(`识别为结构化工作簿，已校验 ${input.cases.length} 条用例。`);
-    console.log('Excel检查结果：' + path.join(config.out, 'excel-inspection.json'));
+    console.log('Excel检查结果：' + logFile(config.out, 'excel-inspection.json'));
 }
 
 export async function runWorkflow(config, mode, readSecret, root) {
@@ -1629,14 +1711,19 @@ export async function runWorkflow(config, mode, readSecret, root) {
             return (tracePromise ??= (async () => {
                 let timer;
                 try {
+                    // An interrupted case keeps its own trace; the rest of the run is discarded.
+                    const active = workflow?.case;
                     await Promise.race([
-                        context.tracing.stop({ path: path.join(config.out, 'trace.zip') }),
+                        workflow.traces.stop(
+                            active,
+                            active ? workflow.evidenceDirectory(active) : null,
+                        ),
                         new Promise((_, reject) => {
                             timer = setTimeout(() => reject(Error('保存 trace 超时')), 5000);
                         }),
                     ]);
                 } catch (error) {
-                    writePrivateJson(path.join(config.out, '轨迹保存失败.json'), {
+                    writePrivateJson(logFile(config.out, 'trace-error.json'), {
                         message: message(error),
                     });
                 } finally {
@@ -1669,7 +1756,6 @@ export async function runWorkflow(config, mode, readSecret, root) {
             phase = 'startup',
             runEvidence = '';
         try {
-            await fs.mkdir(path.join(config.out, 'evidence'), { recursive: true });
             let apiKey =
                 config.provider === 'api'
                     ? registerSecret(await readSecret('API密钥', 'LAYA_API_KEY'))
@@ -1678,7 +1764,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
                 config.python,
                 path.join(root, 'scripts', 'worker.py'),
                 config.model,
-                path.join(config.out, 'decisions.ndjson'),
+                logFile(config.out, 'decisions.ndjson'),
                 {
                     provider: config.provider,
                     base: config.apiBase,
@@ -1718,12 +1804,16 @@ export async function runWorkflow(config, mode, readSecret, root) {
             await saveAuthState(context, page, config);
             await waitModelWarmup(modelWarmup);
             phase = 'testing';
-            writePrivateJson(path.join(config.out, '启动浏览器事件.json'), await diagnostics.end());
+            writePrivateJson(
+                logFile(config.out, 'startup-browser-events.json'),
+                await diagnostics.end(),
+            );
             config.signal.throwIfAborted();
             workflow = new Workflow(page, laya, config, mode, diagnostics);
             journal.checkpoint({ runtime: workflow.runtime(), authStatus });
             // Authentication is complete before screenshots/traces/progress are recorded.
-            await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+            // Traces start per case from here on.
+            workflow.traces = new CaseTraces(context, config.out);
             traceStarted = true;
             const results =
                 mode === 'generate' ? await workflow.generate() : await workflow.replay(input);
@@ -1757,7 +1847,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
             } else {
                 await workbookCommand(config, 'results', {
                     path: path.resolve(config.caseFile),
-                    output: path.join(config.out, '执行结果.xlsx'),
+                    output: path.join(config.out, RUN_FILES.workbook),
                     results,
                 });
                 savedCaseFile = caseFile;
@@ -1768,7 +1858,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
             status = config.signal.aborted ? 'interrupted' : 'failed';
             if (authStatus === 'pending') authStatus = 'failed';
             if (page) {
-                runEvidence = 'evidence/run-failure.png';
+                runEvidence = 'run/failure.png';
                 if (!(await captureFailureScreenshot(page, path.join(config.out, runEvidence))))
                     runEvidence = '';
             }
@@ -1781,7 +1871,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
                 workflow.case = null;
             } else if (diagnostics?.active) {
                 writePrivateJson(
-                    path.join(config.out, '启动浏览器事件.json'),
+                    logFile(config.out, 'startup-browser-events.json'),
                     await diagnostics.end().catch(() => []),
                 );
             }
@@ -1812,7 +1902,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
                     journal.completeCase(blocked, null);
                 }
             }
-            const resultFile = path.join(config.out, '执行结果.xlsx');
+            const resultFile = path.join(config.out, RUN_FILES.workbook);
             let savedResultFile = mode === 'execute' && !failure ? resultFile : null;
             if (mode === 'generate' || failure) {
                 try {
@@ -1911,7 +2001,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
 async function writeWorkflowReport(out, summary) {
     const { results } = summary;
     await fs.writeFile(
-        path.join(out, 'browser-events.ndjson'),
+        logFile(out, 'browser-events.ndjson'),
         results
             .flatMap((r) =>
                 (r.browserEvents || []).map((e) => JSON.stringify({ caseId: r.id, ...e })),
@@ -1934,7 +2024,7 @@ async function writeWorkflowReport(out, summary) {
         `耗时：${summary.durationMs}ms；模型调用：${summary.metrics.modelCalls}`,
         `模型启动：${summary.modelStartup?.mode || '未知'} / ${summary.modelStartup?.status || '未知'}；预热：${summary.modelStartup?.elapsedMs ?? 0}ms`,
         `保留的测试记录：${summary.retainedRecord || '无已确认记录'}`,
-        `未确认写操作：${summary.pendingWrite ? '有，请核对 checkpoint.json 后处理，禁止盲目重跑' : '无'}`,
+        `未确认写操作：${summary.pendingWrite ? '有，请核对 logs/checkpoint.json 后处理，禁止盲目重跑' : '无'}`,
         summary.error ? `运行错误：${clean(summary.error)}` : '',
         summary.runEvidence ? `运行截图：${summary.runEvidence}` : '',
         '',
@@ -1962,7 +2052,7 @@ async function writeWorkflowReport(out, summary) {
             ),
         ),
     ];
-    await fs.writeFile(path.join(out, '报告.md'), md.join('\n') + '\n');
+    await fs.writeFile(path.join(out, RUN_FILES.summary), md.join('\n') + '\n');
 }
 
 export function workbookCommand(config, command, payload) {

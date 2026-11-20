@@ -1,28 +1,53 @@
 # LayaPilot · 企业管理后台自动化测试
 
-[English](README.en.md) · [更新说明](references/changelog.md) · [下载 skill](https://github.com/anthonyli/laya-pilot/releases/latest) · [使用指南](references/workflows.md) · [配置说明](references/setup.md) · [架构](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
+[English](README.en.md) · [更新说明](references/changelog.md) · [下载 skill](https://github.com/anthonyli/laya-pilot/releases/latest) · [工作流程](docs/workflow.md) · [使用指南](references/workflows.md) · [配置说明](references/setup.md) · [看报告](references/reports.md) · [架构](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
 
-把已有 Excel 测试用例交给 AI，在浏览器中按原步骤和预期执行，获得测试报告与失败证据。LayaPilot 主要面向企业后台的表格、筛选、表单和增删改查，也支持按需从页面生成经过实际验证的新用例。
+LayaPilot 在浏览器里执行测试用例，输出测试报告和失败证据。适用于企业后台的表格、筛选、表单和增删改查页面。
 
-**仓库根目录就是一个完整 skill，入口为 [SKILL.md](SKILL.md)。** 推荐通过 AI 使用，也可直接运行 `scripts/run.mjs`。默认调用 API，本地模型按需启用。
+![公开 demo](docs/demo.png)
 
-## 快速开始
+## 能做什么
 
-需要 **Node.js 20+（含 npm）和 Python 3.10+（含 venv/pip）**。API 模式无需显卡或本地模型权重；选择本地推理时，直接按下方[本地模型](#使用本地模型)一节安装。
+| 功能               | 输入                       | 输出                                       |
+| ------------------ | -------------------------- | ------------------------------------------ |
+| **回归已有 Excel** | 你的 Excel 用例 + 页面地址 | 每条用例的结果、失败步骤、截图和执行轨迹   |
+| **录制生成用例**   | 页面地址，你在浏览器里操作 | 可编辑的 Excel 用例 + 原始 Playwright 脚本 |
+| **从页面生成用例** | 页面地址 + 允许的操作范围  | 实际执行并通过断言的新 Excel 用例          |
 
-### 1. 安装 skill
+执行时由 Laya 决策模型根据当前页面选择控件，默认通过 **API** 调用模型。本地模型需要显式开启。各功能如何串起来，见 [工作流程图](docs/workflow.md)。
 
-将完整仓库克隆到 AI 工具的 skill 安装目录下的 `laya-pilot/`，或安装分发 ZIP 中的 `laya-pilot/` 目录。保留整个目录结构，无须先构建。在安装后的 skill 目录执行：
+## 选择使用方式
+
+有两种用法，**各自独立安装，配置不互通**，按需选一种即可：
+
+|          | 命令行 `laya`                  | AI skill                                                 |
+| -------- | ------------------------------ | -------------------------------------------------------- |
+| 适合     | 自己跑用例、接入 CI            | 在 Cursor、Codex 等工具里用自然语言下任务                |
+| 安装     | `npm link` 后运行 `laya setup` | 放进 AI 工具的 skill 目录后运行 `node scripts/setup.mjs` |
+| 配置文件 | `~/.laya/.env.local`           | skill 目录下的 `.env.local`                              |
+| 命令写法 | `laya run …`                   | `node scripts/run.mjs …`（通常由 AI 调用）               |
+
+两者参数相同：`laya X` 对应 `node scripts/run.mjs X`，`laya setup` 对应 `node scripts/setup.mjs`。
+
+**环境要求：** Node.js 20+（含 npm）。使用 Excel 相关功能还需要 Python 3.10+（含 venv 和 pip）。只录制和回放 Playwright 脚本时不需要 Python。
+
+## 命令行快速开始
+
+### 1. 安装
 
 ```bash
-node scripts/setup.mjs
+git clone https://github.com/anthonyli/laya-pilot.git
+cd laya-pilot
+npm install
+npm link            # 提示没有权限时改用 sudo npm link
+laya setup          # 安装 Chromium、Python 环境和 openpyxl，生成配置文件
 ```
 
-安装脚本准备 Playwright、Chromium 和 Python 依赖，并从 [配置示例](assets/.env.example) 创建 `.env.local`；已有配置保留原样。
+配置、Python 环境和模型都放在 `~/.laya/`，重装 `laya` 不会丢失。需要换目录时设置环境变量 `LAYA_HOME`。
 
-### 2. 配置 API 和登录
+### 2. 配置 API
 
-在 skill 根目录的 `.env.local` 中填写：
+编辑 `~/.laya/.env.local`：
 
 ```dotenv
 LAYA_API_BASE=https://your-gateway.example/v1
@@ -30,137 +55,156 @@ LAYA_API_MODEL=laya-decision
 LAYA_API_KEY=your-api-key
 ```
 
-模型名可按服务实际支持的名称修改。接口需兼容 HTTPS Chat Completions，并返回本项目要求的候选决策 JSON；仅接口路径兼容并不代表模型可用，详见 [API 协议](references/setup.md#api-协议)。
+接口需兼容 HTTPS Chat Completions，并返回本项目要求的决策 JSON，详见 [API 协议](references/setup.md#api-协议)。需要自动登录时，可以在这个文件里补充以下配置：
 
-`.env.local` 只保存长期使用的 API 和登录配置。以下登录项按需填写：
+| 配置                                 | 用途                                   |
+| ------------------------------------ | -------------------------------------- |
+| `TEST_USER`、`TEST_PASSWORD`         | 登录账号和密码                         |
+| `TEST_AUTH_STATE`、`TEST_AUTH_CHECK` | 复用的登录态文件、登录成功后的页面标记 |
 
-| 配置                                 | 用途                                         |
-| ------------------------------------ | -------------------------------------------- |
-| `TEST_USER`、`TEST_PASSWORD`         | 自动登录账号与密码                           |
-| `TEST_AUTH_STATE`、`TEST_AUTH_CHECK` | 登录态文件路径与登录后唯一页面标记，配套设置 |
+Excel 路径、页面地址和输出目录在每次运行时通过参数传入，不写进配置文件。密钥和密码不要写在命令行里。
 
-**Excel、目标 URL、操作范围和输出位置由每次任务提供。** 高级选项见 [配置说明](references/setup.md#高级参数)，无需全部写入 `.env.local`。密码、API 密钥和登录态不提交到 Git，也不写进任务指令或命令行。
+### 3. 检查并运行
 
 ```bash
-node scripts/setup.mjs --check
+laya check                                   # 检查依赖和配置是否齐全（不测试网关连通性）
+laya run --excel cases.xlsx --inspect        # 只检查用例文件，不打开浏览器
+laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
 ```
 
-该命令检查依赖和配置是否齐全，不验证 API 连通性。需要核对版本与内容摘要时运行 `node scripts/run.mjs --version`。
+报告写在当前目录的 `runs/laya-pilot/<本轮>/`。查看全部命令：`laya --help`。
 
-### 3. 让 AI 执行任务
+## 常用任务
 
-如果只提供网址或说“测试一下这个页面”，AI 会先确认：**生成测试用例，还是执行已有 Excel 用例？** 生成会探索页面、验证后导出新用例；执行需要提供 Excel 文件或路径。已经说明目的时不会重复询问。
+### 回归已有 Excel
 
-在支持 `$skill-name` 的工具中，提供本次用例和目标地址：
-
-```text
-用 $laya-pilot 执行 /absolute/path/cases.xlsx 的全部用例。
-目标地址是 https://your-test-app.example/module。
-先检查解析结果，再无头执行，提供报告和失败证据。
+```bash
+laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
 ```
 
-需要生成新用例或分析已有结果时：
+- 已有 Excel 不需要转换格式。没有用例时，可以复制 [Excel 模板](assets/test-cases-template.xlsx)，按 [填写说明](references/case-template.md) 修改其中的示例。
+- 默认执行全部用例，用例中的步骤和预期保持原样，原工作簿不会被改写。
+- 用例包含新增、修改、删除时，需在测试环境中加 `--allow-write`。
+
+### 录制操作，生成用例
+
+```bash
+laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
+```
+
+1. 在打开的浏览器里完成操作，用工具栏的断言按钮标记“应该看到什么”。
+2. 关闭浏览器后，会同时保存 `filter.xlsx`（自然语言用例，可直接编辑）和 `filter.spec.cjs`（原始 Playwright 脚本）。
+3. 回放 Excel：
+
+```bash
+laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
+```
+
+只要 Playwright 脚本、不使用 Excel 和模型时：
+
+```bash
+laya setup --recording                       # 只安装浏览器
+laya record 'https://your-test-app.example/customers' --code-only --out recorded-cases/filter.spec.cjs
+laya replay recorded-cases/filter.spec.cjs --out runs/filter-check
+laya report runs/filter-check                # 在浏览器中打开 HTML 报告
+```
+
+录制会保留输入的值，请使用测试数据。之前录好的脚本可以用 `laya export-excel FILE.spec.cjs` 转成 Excel。更多说明见 [录制与回放](references/recording.md)。
+
+### 从页面生成用例
+
+```bash
+laya run --mode generate --url 'https://your-test-app.example/module' --read-only
+```
+
+LayaPilot 会探索页面并实际执行，只导出断言通过的用例，保存在 `generated-cases/`。需要先审核用例再执行时，使用 [审核草稿流程](references/review-plan.md)。
+
+### 使用本地模型
+
+```bash
+laya setup --local-model                     # 安装依赖并下载模型权重，需要较多磁盘和内存
+laya run --provider local --excel cases.xlsx --url URL --headless
+```
+
+每次运行都要传 `--provider local`。不传时始终使用 API，安装了模型也不会自动切换。详见 [本地模型配置](references/setup.md#仅在用户明确要求时本地模型)。
+
+## 通过 AI skill 使用
+
+1. 把整个仓库，或 [Release ZIP](https://github.com/anthonyli/laya-pilot/releases/latest) 中的 `laya-pilot/` 目录，放进 AI 工具的 skill 目录。
+2. 在该目录运行 `node scripts/setup.mjs`，然后在同一目录的 `.env.local` 中填写 API 配置（字段同上）。
+
+不需要安装 `laya` 命令。之后直接用自然语言下任务：
 
 ```text
+用 $laya-pilot 执行 /absolute/path/cases.xlsx 的全部用例，目标地址是 https://your-test-app.example/module。
+先检查解析结果，再无头执行，给出报告和失败证据。
+
 用 $laya-pilot 为 https://your-test-app.example/module 生成只读测试用例。
 
 用 $laya-pilot 分析 /absolute/path/run/results.json，说明失败步骤和原因。
 ```
 
-首次登录可以人工完成，也可使用已配置的账号。告诉 AI“记住登录态”后，它会配置 `.auth/` 中的状态文件及登录成功标记；下次先验证并复用，失效后重新登录。仅分析报告无需安装运行依赖或配置 API。
+- 只给网址时，AI 会先问你要生成用例，还是执行已有 Excel。
+- 说“记住登录态”后，AI 会保存登录状态，下次验证有效就直接复用。
+- 只分析已有报告时，不需要安装依赖或配置 API。
 
-## 直接运行命令
+## 报告
 
-没有用例模板时，可下载 [含示例的 Excel 模板](assets/test-cases-template.xlsx)，内含按钮可见、客户搜索、重置筛选三条示例，按 [填写说明](references/case-template.md)修改或删除示例后执行；也可以直接让 AI 提供模板副本。已有 Excel 无需转换，想从页面生成用例时无需先填模板。
+每轮在当前目录生成 `runs/laya-pilot/<日期_时间>/`，整个目录一起发送即可：
 
-安装与配置同上。以下命令在 skill 根目录执行；从其他目录调用时，使用脚本的绝对路径。
-
-```bash
-# 检查工作簿，不启动浏览器或模型
-node scripts/run.mjs --excel '/absolute/path/cases.xlsx' --inspect
-
-# 执行已有或生成的 Excel
-node scripts/run.mjs --excel '/absolute/path/cases.xlsx' \
-  --url 'https://your-test-app.example/module' --headless
-
-# 从页面生成只读用例
-node scripts/run.mjs --mode generate \
-  --url 'https://your-test-app.example/module' --read-only
+```text
+index.html     从这里开始：可靠性结论、用例列表、每一步的截图
+summary.md     文字版报告        results.json   机器可读结果        results.xlsx   结果表格
+cases/         每条用例一个目录，每一步都有截图，如 03-预期2-失败.png；未通过的用例另有 trace.zip（执行轨迹）
+logs/          过程文件，排查时再看
 ```
 
-已有用例与生成用例共用 `--excel`，自动识别格式。输入工作簿保持原样；生成用例仅在明确要求时进行。执行已授权的新增、修改、删除用例时加 `--allow-write`。完整参数和登录方式见 [工作流指南](references/workflows.md)，命令帮助为 `node scripts/run.mjs --help`。
+打开报告：`laya report runs/laya-pilot/<日期_时间>`。页面顶部给出结论：**通过，证据完整** / **通过，但需要复核** / **未通过**，并列出原因，比如阻断、预期未验证、页面或接口报错、截图缺失。只看“通过 N 条”不足以判断结果是否可信，以这一栏为准。
 
-## 使用本地模型
+- 生成的用例保存在 `generated-cases/`，只收录实际执行且断言通过的用例。
+- `--inspect` 通过只说明用例文件没问题，测试是否通过以页面断言为准。
+- 用 `--out` 指定报告目录，用 `--case-file` 指定生成用例的路径。
 
-本地推理无需 API 配置，账号和登录态仍可复用。首次在 skill 根目录安装依赖并下载模型：
+详见 [测试报告怎么看](references/reports.md)。
 
-```bash
-node scripts/setup.mjs --local-model
-node scripts/setup.mjs --check --local-model
-```
+## 支持范围
 
-默认下载 `convaiinnovations/laya-multilingual` 到 `models/laya-multilingual/`，需要网络及额外磁盘、内存。每次执行显式选择本地模式：
-
-```bash
-node scripts/run.mjs --provider local \
-  --excel '/absolute/path/cases.xlsx' \
-  --url 'https://your-test-app.example/module' --headless
-```
-
-已有兼容模型时，确保本地推理依赖已安装，并在运行命令中加 `--model '/absolute/path/model'`，无需向 `.env.local` 添加模型参数。详细安装方式见 [本地模型配置](references/setup.md#仅在用户明确要求时本地模型)。**不传 `--provider local` 时仍使用 API；安装模型不会改变默认模式。**
-
-## 报告与支持范围
-
-默认在调用者当前工作目录下创建独立产物：
-
-| 产物           | 默认位置与内容                                                      |
-| -------------- | ------------------------------------------------------------------- |
-| 回归报告       | `runs/laya-pilot/<本轮>/`：JSON、Markdown 及实际产生的浏览器证据    |
-| Excel 执行结果 | 普通用例另有 CSV；生成和结构化执行另有 `执行结果.xlsx`              |
-| 新生成用例     | `generated-cases/laya-pilot-*.xlsx`，仅收录实际执行且断言通过的用例 |
-
-报告保留失败、阻断和未覆盖情况。`--inspect` 通过只表示文件检查成功；页面断言才决定测试是否通过。用 `--out` 指定报告目录，用 `--case-file` 指定生成用例的输出路径。
-
-当前使用 Playwright 和 Laya 决策协议，主要覆盖后台表格、筛选、表单和 CRUD。只读筛选检查验证控件可见，不代表查询结果与重置行为正确。复杂审批、多账号权限、文件导入及 Canvas 等流程需要专项适配；后续工作在 [Issues](https://github.com/anthonyli/laya-pilot/issues) 跟踪。
+目前主要覆盖后台表格、筛选、表单和增删改查。复杂审批、多账号权限、文件导入、Canvas 等场景需要专项适配，进展在 [Issues](https://github.com/anthonyli/laya-pilot/issues) 跟踪。
 
 ## 体验 demo
 
-在 skill 根目录启动演示服务，打开 `http://127.0.0.1:8765/customers`：
-
 ```bash
-npm run demo
+npm run demo        # 然后打开 http://127.0.0.1:8765/customers
 ```
 
-演示页面和示例工作簿位于 [examples/](examples/)。可将 `examples/demo-cases.xlsx` 和上述地址提供给 AI，按用例范围执行测试。
+示例页面和用例在 [examples/](examples/)，可以用 `examples/demo-cases.xlsx` 加上述地址试跑。[介绍视频](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
 
-![公开 demo](docs/demo.png)
-
-[介绍视频](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
-
-## 项目结构与维护
+## 开发
 
 ```text
-SKILL.md       AI 使用入口
-scripts/       安装、执行、demo、打包脚本及运行库
-references/    安装配置与测试工作流
-assets/        配置模板与含示例的 Excel 用例模板
-examples/      demo 页面与示例用例
+bin/           laya 命令入口
+scripts/       执行代码（skill 和命令行共用）、安装和打包脚本
+SKILL.md       AI skill 入口
+references/    skill 的使用说明
+assets/        配置模板和 Excel 用例模板
+examples/      demo 页面和示例用例
 docs/          架构与技术说明
-tests/         自动化回归测试
+tests/         自动化测试
 ```
-
-仓库只维护一份运行源码。需要分发或升级安装副本时：
 
 ```bash
-python3 scripts/package_skill.py
-python3 scripts/package_skill.py --check
-python3 scripts/package_skill.py --install-to /absolute/path/installed-skill
+npm ci
+npm test && npm run test:browser && npm run format:check   # 格式检查需要 uv
 ```
 
-交付包只保留 `SKILL.md`、运行脚本、使用说明、配置模板、运行依赖清单与许可证；排除 demo、测试、GitHub 配置、README、开发工具和打包脚本，也不包含本机配置、登录态、已安装依赖或模型。包内 npm 清单仅保留运行依赖及启动命令，源码仓库保持不变。
+打包 skill（生成 `dist/laya-pilot-skill.zip`，不含 demo、测试、README 和本机配置）：
 
-打包按需生成 `dist/laya-pilot-skill.zip`，`dist/` 已由 Git 忽略，不提交交付产物。解压后将整个 `laya-pilot/` 目录交给接收方，按上述安装步骤使用。`--check` 比较已生成 ZIP 与当前源码。升级保留 `.env.local`、`.auth`、依赖和模型，随后在安装目录运行 `node scripts/setup.mjs` 更新依赖。升级会清理旧 manifest 记录中已不再分发的文件，包括旧版 demo；无 manifest 的旧文件不会自动删除。
+```bash
+npm run skill:package
+npm run skill:check                                          # 检查 ZIP 与源码是否一致
+python3 scripts/package_skill.py --install-to /path/to/installed-skill   # 升级已安装的副本，保留其配置和登录态
+```
 
-开发时用 `npm ci` 安装依赖，运行 `npm test`、`npm run test:browser` 和 `npm run format:check`；格式检查需要 `uv`。Python 测试及更多验证方式见 [运行指南](docs/local-runtime.md)。
+更多验证方式见 [运行指南](docs/local-runtime.md)。
 
-[MIT License](LICENSE)。Laya、Playwright 及模型权重遵循各自许可证。
+[MIT License](LICENSE)。Laya、Playwright 及模型权重遵循各自的许可证。

@@ -471,6 +471,7 @@ export async function target(
         value,
         meta = {},
         rowKey,
+        ordinal,
         allowDisabled = false,
         minProbability = 0.68,
         minMargin = 0.18,
@@ -495,6 +496,14 @@ export async function target(
     let candidates = snap.controls.filter(
         (c) => c.role !== 'password' && (allowDisabled || !c.disabled),
     );
+    const orderedLocator =
+        ordinal && page.getByRole('button', { name: intent, exact: true }).nth(ordinal - 1);
+    if (orderedLocator) {
+        const ref = await orderedLocator.getAttribute(ATTR, { timeout: 1200 }).catch(() => null);
+        candidates = candidates.filter((c) => ref && c.frame === 0 && c.ref === ref);
+        if (!candidates.length)
+            throw new Halt('录制位置未确认', `没有找到第 ${ordinal} 个可用的「${intent}」按钮。`);
+    }
     if (rowKey) candidates = candidates.filter((c) => c.rowKey === rowKey);
     if (['fill', 'clear', 'value', 'empty'].includes(kind))
         candidates = candidates.filter(
@@ -577,12 +586,16 @@ export async function target(
                 : ''),
         control: c,
     }));
+    const recordedAction = ordinal ? `点击第 ${ordinal} 个「${intent}」按钮` : null;
     const criteria = Object.fromEntries(
-        keyed.map(({ key, control: c }) => [key, prefix + c.name.slice(0, 38)]),
+        keyed.map(({ key, control: c }) => [key, recordedAction || prefix + c.name.slice(0, 38)]),
     );
     const stopKey = en ? 'Stop' : '停止';
     criteria[stopKey] = en ? 'Do not perform any action' : '不执行';
-    const decision = await laya.choose(prefix + intent, criteria, {
+    const state = recordedAction
+        ? `用户录制的步骤：${recordedAction}。已在当前页面按名称核对按钮顺序，候选对应此位置。`
+        : prefix + intent;
+    const decision = await laya.choose(state, criteria, {
         ...meta,
         phase: 'target',
         url: snap.url,
@@ -601,6 +614,11 @@ export async function target(
     const locator = snap.frames[c.frame].locator(`[${ATTR}="${c.ref}"]`);
     if ((await locator.count()) !== 1 || !(await locator.isVisible()))
         throw new Halt('DOM已变化', '决定完成后DOM已变化，当前步骤停止，避免误点。');
+    if (
+        orderedLocator &&
+        (await orderedLocator.getAttribute(ATTR, { timeout: 1200 }).catch(() => null)) !== c.ref
+    )
+        throw new Halt('DOM已变化', '模型判断期间同名按钮的位置发生变化，当前步骤停止。');
     if (c.binding) {
         const valid =
             page.url() === c.binding.url &&

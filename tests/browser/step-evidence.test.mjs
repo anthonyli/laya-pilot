@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { Engine } from '../../scripts/lib/engine.mjs';
+import { BrowserDiagnostics, HEALTH_EXPECTATIONS } from '../../scripts/lib/diagnostics.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const python = process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3';
@@ -21,11 +22,16 @@ const model = {
     },
 };
 
-async function fixture(fn) {
+async function fixture(fn, content = html) {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-step-evidence-'));
-    const server = http.createServer((req, res) =>
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html),
-    );
+    const server = http.createServer((req, res) => {
+        if (req.url === '/api/http-error') return res.writeHead(500).end();
+        if (req.url === '/api/body-error')
+            return res
+                .writeHead(200, { 'content-type': 'application/json' })
+                .end('{"success":false,"message":"业务失败"}');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(content);
+    });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const url = `http://127.0.0.1:${server.address().port}`;
     try {
@@ -37,6 +43,50 @@ async function fixture(fn) {
         await fs.rm(directory, { recursive: true, force: true });
     }
 }
+
+test('real browser health checks distinguish visible errors, script errors, HTTP errors, and failed API bodies', async () => {
+    const content = `<!doctype html><meta charset="utf-8"><h1>列表</h1>
+<button onclick="document.getElementById('alert').hidden=false; fetch('/api/http-error'); fetch('/api/body-error'); throw Error('synthetic scripting failure')">运行</button>
+<p id="alert" role="alert" hidden>操作失败</p>`;
+    await fixture(async (out, url) => {
+        const browser = await chromium.launch({ headless: true });
+        try {
+            const page = await browser.newPage();
+            const engine = new Engine(
+                page,
+                model,
+                {
+                    out,
+                    url,
+                    origins: [url],
+                    data: {},
+                    runId: 'test',
+                    maxSteps: 10,
+                    pageTimeout: 3000,
+                    delay: 0,
+                },
+                new BrowserDiagnostics(page.context(), { checkBusinessResponses: true }),
+            );
+            const result = await engine.runCase(
+                caseInput(url, {
+                    steps: '点击「运行」按钮',
+                    expected: Object.values(HEALTH_EXPECTATIONS).join('\n'),
+                }),
+            );
+            assert.equal(result.status, '失败');
+            assert.ok(result.health_checks.every((check) => check.status === '失败'));
+            for (const kind of ['ui-error', 'pageerror', 'http', 'api-body'])
+                assert.ok(
+                    result.browser_events.some(
+                        (event) => event.kind === kind && event.step?.index === 1,
+                    ),
+                    `missing ${kind}`,
+                );
+        } finally {
+            await browser.close();
+        }
+    }, content);
+});
 
 function caseInput(url, changes = {}) {
     return {
@@ -270,13 +320,17 @@ book.save(sys.argv[1])
                 evidence.map((e) => e.status),
                 ['已完成', '通过', '失败'],
             );
-            const md = await fs.readFile(path.join(out, '报告.md'), 'utf8');
-            const csv = await fs.readFile(path.join(out, '结果.csv'), 'utf8');
+            const md = await fs.readFile(path.join(out, 'summary.md'), 'utf8');
+            const index = await fs.readFile(path.join(out, 'index.html'), 'utf8');
+            const href = (file) => file.split('/').map(encodeURIComponent).join('/');
             assert.match(md, /步骤与断言证据/);
-            assert.match(csv, /步骤与断言证据/);
+            assert.match(index, /未通过/);
+            await fs.access(path.join(out, 'results.xlsx'));
             for (const e of evidence) {
+                // Screenshots live in the case's own directory and are shown on the index page.
+                assert.ok(e.screenshot.startsWith(summary.results[0].evidence_dir + '/'));
                 assert.ok(md.includes(e.screenshot));
-                assert.ok(csv.includes(e.screenshot));
+                assert.ok(index.includes(href(e.screenshot)));
                 assert.ok(md.includes(e.at));
                 assert.ok((await fs.stat(path.join(out, e.screenshot))).size > 0);
             }

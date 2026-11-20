@@ -32,6 +32,7 @@ async function fixture(t) {
         path.join(skill, 'scripts/lib/diagnostics.mjs'),
     );
     await fs.copyFile(path.join(root, 'package.json'), path.join(skill, 'package.json'));
+    await fs.cp(path.join(root, 'bin'), path.join(skill, 'bin'), { recursive: true });
     // Record the launched command at the runtime boundary without installing or calling models.
     await fs.writeFile(
         path.join(skill, 'scripts/runner.mjs'),
@@ -205,16 +206,95 @@ test('setup check and launcher resolve the same environment and redact secrets i
     assert.equal(override.config.sources.apiModel, 'cli');
 });
 
-test('standalone help works before setup and names only bundled entry points', async (t) => {
-    const { skill, cwd } = await fixture(t);
-    const result = spawnSync(process.execPath, [path.join(skill, 'scripts', 'run.mjs'), '--help'], {
-        cwd,
-        encoding: 'utf8',
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /API model by default/);
-    assert.match(result.stdout, /node scripts\/run\.mjs --mode generate/);
-    assert.doesNotMatch(result.stdout, /run\.sh/);
+test('skill help names only bundled scripts, never the laya command', async (t) => {
+    const { skill, cwd, env } = await fixture(t);
+    const help = (...args) =>
+        spawnSync(process.execPath, [path.join(skill, 'scripts', 'run.mjs'), ...args], {
+            cwd,
+            env,
+            encoding: 'utf8',
+        });
+    for (const args of [['--help'], ['help', 'run'], ['record', '--help'], ['replay', '--help']]) {
+        const result = help(...args);
+        assert.equal(result.status, 0, result.stderr);
+        assert.doesNotMatch(
+            result.stdout,
+            /\blaya (?:setup|check|run|record|replay|report|help)\b/,
+        );
+        assert.doesNotMatch(result.stdout, /\u001b\[/);
+    }
+    const home = help('--help').stdout;
+    assert.match(home, /API model by default/);
+    assert.match(home, /node scripts\/run\.mjs --mode generate/);
+    assert.match(home, /node scripts\/run\.mjs record URL/);
+    assert.match(home, /node scripts\/setup\.mjs --recording/);
+    const setup = spawnSync(
+        process.execPath,
+        [path.join(skill, 'scripts', 'setup.mjs'), '--help'],
+        {
+            cwd,
+            env,
+            encoding: 'utf8',
+        },
+    );
+    assert.doesNotMatch(setup.stdout, /\blaya (?:setup|check)\b/);
+});
+
+test('laya command keeps its own help and stores state in LAYA_HOME, not the package', async (t) => {
+    const { skill, cwd, env } = await fixture(t);
+    const home = path.join(cwd, 'laya home');
+    const laya = (...args) =>
+        spawnSync(process.execPath, [path.join(skill, 'bin', 'laya.mjs'), ...args], {
+            cwd,
+            env: { ...env, LAYA_HOME: home },
+            encoding: 'utf8',
+        });
+    const help = laya('--help');
+    assert.equal(help.status, 0, help.stderr);
+    assert.match(help.stdout, /laya setup --recording/);
+    assert.match(help.stdout, /laya record URL/);
+    assert.doesNotMatch(help.stdout, /node scripts\/|references\/|--mode generate/);
+    assert.match(laya('help', 'run').stdout, /laya run --mode generate/);
+
+    // A fresh install has no venv: check reports missing items instead of crashing.
+    const check = laya('check');
+    assert.equal(check.status, 1);
+    assert.doesNotMatch(check.stderr, /cannot be empty/);
+    assert.match(check.stdout, /MISSING Python 3\.10\+/);
+    const config = JSON.parse(
+        check.stdout
+            .split('\n')
+            .find((line) => line.startsWith('CONFIG '))
+            .slice(7),
+    );
+    assert.equal(config.envPath, path.join(home, '.env.local'));
+    assert.equal(config.dataRoot, home);
+
+    await fs.mkdir(home);
+    await fs.writeFile(path.join(home, '.env.local'), 'LAYA_API_MODEL=from-cli-home\n');
+    await fs.writeFile(path.join(skill, '.env.local'), 'LAYA_API_MODEL=from-skill\n');
+    const cliConfig = JSON.parse(
+        laya('check')
+            .stdout.split('\n')
+            .find((line) => line.startsWith('CONFIG '))
+            .slice(7),
+    );
+    assert.equal(cliConfig.apiModel, 'from-cli-home');
+
+    // The skill ignores LAYA_HOME and keeps using its own directory.
+    const skillCheck = spawnSync(
+        process.execPath,
+        [path.join(skill, 'scripts', 'setup.mjs'), '--check'],
+        { cwd, env: { ...env, LAYA_HOME: home }, encoding: 'utf8' },
+    );
+    const skillConfig = JSON.parse(
+        skillCheck.stdout
+            .split('\n')
+            .find((line) => line.startsWith('CONFIG '))
+            .slice(7),
+    );
+    assert.equal(skillConfig.apiModel, 'from-skill');
+    assert.equal(skillConfig.envPath, path.join(skill, '.env.local'));
 });
 
 test('source skill reports package version without a generated manifest', async (t) => {

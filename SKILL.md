@@ -43,15 +43,16 @@ description: Run browser regression tests from user-provided Excel test cases fo
 1. 从当前任务获取 Excel 和目标地址，通过 `--excel`、`--url` 传入；登录方式可复用 `.env.local` 中的配置。用户要求回归却未提供用例时，先补齐用例文件；没有模板时提供内置模板，不自动改成从页面生成用例。
 2. 使用 `scripts/run.mjs --excel ... --inspect` 自动识别工作簿并检查解析、计划校验、用例数与导入警告。普通 Excel 的 `diagnostics` 和 `compilation` 分别指出缺失数据、待页面定位、缺少业务判定依据及原预期到子断言的映射；按原行和用例说明需补充的信息，不因此删选用例或把业务预期改成控件可见。默认包含全部读取到的用例；未识别的工作表或步骤要明确报告，不能算作已覆盖。
 3. 执行这些现有用例；常用无头回归命令为 `scripts/run.mjs --excel ... --url ... --headless`。按原用例保留数据、步骤和预期；只有用户明确要求修订时才修改原用例。登录前检查已配置的 `authState` 和登录后唯一标记 `authCheck`，优先复用并验证已有登录态；失效后再登录。
-4. 读取本轮报告，按用例给出结果、失败步骤与证据路径。普通用例输出 JSON、CSV、Markdown；结构化用例输出独立结果 Excel、JSON、Markdown。浏览器证据按实际产物提供，原始工作簿保持不变。
+4. 读取本轮目录的 `summary.md` 与 `results.json`，先转述 `index.html` 顶部的可靠性结论及原因（如阻断、未验证预期、页面或接口错误），再按用例给出结果、失败步骤与截图路径（`cases/<编号>-<名称>/`），并提供 `index.html` 路径供用户打开。目录说明见 [references/reports.md](references/reports.md)。原始工作簿保持不变。
 
 只有用户明确要求生成或补充新用例时，才进入 `--mode generate`。生成完成后仍使用 `--excel` 执行输出工作簿。
 
 ## 工作入口
 
 - 查询版本变更、升级兼容性与已知范围：读取 [references/changelog.md](references/changelog.md)。
+- 用户要求录制浏览器操作生成用例或回放录制：读取 [references/recording.md](references/recording.md)，使用本包的 `scripts/run.mjs record|replay|export-excel|report`，不要调用系统中的 `laya` 命令（它是独立安装，配置和版本可能与本 skill 不同）。
 
-- 仅解读已有报告：直接读取用户指定的 `results.json` 和证据，无须安装依赖、配置 API 或重新测试。
+- 仅解读已有报告：读取用户指定运行目录的 `summary.md`、`results.json` 和 `cases/` 中的截图，目录结构和可靠性结论见 [references/reports.md](references/reports.md)；无须安装依赖、配置 API 或重新测试。
 - 安装、检查环境或配置模型：按需读取 [references/setup.md](references/setup.md)。
 - 执行已有用例回归、登录和结果解释：读取 [references/workflows.md](references/workflows.md) 的主流程；按需查看其中的生成流程和内部格式说明。
 
@@ -87,6 +88,6 @@ node scripts/setup.mjs --check
 - `--excel` 默认执行所有读取到的用例，不按历史结果或用例类型筛选。只有用户明确指定部分编号时才使用 `--cases`；目前仅普通 Excel 支持编号筛选，结构化计划需完整执行，不支持时应明确报错。
 - 输出默认保存到用户当前工作目录下的新 `runs/laya-pilot/` 目录；生成文件使用新的 `generated-cases/laya-pilot-*.xlsx` 文件名。需要指定位置时用 `--out` 和 `--case-file`。
 - 读取本轮实际报告，分别说明通过、失败、不适用、阻断和未执行情况，提供实际存在的用例、结果表格、报告和失败证据路径。Excel 解析成功、只读检查成功与完整业务测试成功要明确区分。
-- 如有 `pendingWrite` 或 `retainedRecord`，先核对 `checkpoint.json` 与证据再决定后续操作，不盲目重复保存、删除或清理。进度文件不支持自动断点续跑。
+- 如有 `pendingWrite` 或 `retainedRecord`，先核对 `logs/checkpoint.json` 与证据再决定后续操作，不盲目重复保存、删除或清理。进度文件不支持自动断点续跑。
 - 无标签图标不能按位置猜测；先读取未识别控件诊断与截图，仅在有可核实语义时使用显式绑定，规则见 [references/control-bindings.md](references/control-bindings.md)。
 - API 失败时说明连接、响应或协议问题；本包调用 HTTPS Chat Completions 接口，模型必须返回本项目要求的候选决策 JSON，细节见安装说明。不会自动更换服务或模型。

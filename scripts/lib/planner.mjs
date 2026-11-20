@@ -25,6 +25,8 @@ export function expandStep(text, { controls = [], area = null } = {}) {
     if (/^(?:弹出|打开了).*(?:Drawer|Modal|抽屉|弹窗|对话框)$/i.test(source))
         return [{ verb: 'assertStep', target: source }];
     if (/^不填写任何必填字段$/.test(source)) return [{ verb: 'emptyRequired', target: source }];
+    if (source.startsWith('检查步骤预期：'))
+        return [{ verb: 'assertStep', target: source.slice('检查步骤预期：'.length) }];
     if (/^鼠标悬[浮停]/.test(source))
         source = source
             .replace(/^鼠标悬[浮停](?:在)?/, '悬停在')

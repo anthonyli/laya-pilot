@@ -209,15 +209,20 @@ test(
             assert.equal(result.results[0].unidentified_controls[0].elementId, 'unknown');
             assert.ok(result.results[0].input_diagnostics);
             assert.equal(result.results[0].evidence.length, 2);
-            const markdown = await fs.readFile(path.join(directory, 'result/报告.md'), 'utf8');
-            for (const heading of ['步骤与断言证据', '用例可执行性诊断', '未识别控件与绑定诊断'])
+            const markdown = await fs.readFile(path.join(directory, 'result/summary.md'), 'utf8');
+            for (const heading of ['步骤与断言证据', '未识别控件与绑定诊断'])
                 assert.ok(markdown.includes(heading));
+            // Empty sections are omitted: the diagnostics heading appears only with content.
+            const actionable = result.results[0].input_diagnostics.filter(
+                (d) => d.code !== 'needs-live-target',
+            );
+            assert.equal(markdown.includes('用例可执行性诊断'), actionable.length > 0);
             assert.equal(result.results[0].assertions[0].kind, 'conjunction');
             assert.equal(result.results[0].assertions[0].assertions.length, 2);
             assert.equal(result.results[0].expected, source(url).cases[0].expected);
             assert.deepEqual(await fs.readFile(file), original);
             const approval = JSON.parse(
-                await fs.readFile(path.join(directory, 'result/review-plan-approval.json')),
+                await fs.readFile(path.join(directory, 'result/logs/review-plan-approval.json')),
             );
             assert.equal(approval.sha256, metadata.sha256);
         } finally {
