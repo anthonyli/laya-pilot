@@ -679,6 +679,29 @@ export class Engine {
         } else if (verb === 'press') {
             if (spec.value.toLowerCase() === 'enter' && !this.config.allowWrite)
                 throw new Halt('写入未启用', 'Enter可能提交当前表单；未启用写入时不猜测其行为');
+            if (spec.locator) {
+                const methods = {
+                    标签: 'getByLabel',
+                    占位符: 'getByPlaceholder',
+                    文本: 'getByText',
+                };
+                const options = { exact: spec.exact };
+                const locator = spec.role
+                    ? this.page.getByRole(spec.role, { name: spec.target, ...options })
+                    : this.page[methods[spec.locator]](spec.target, options);
+                const timeout = { timeout: this.config.pageTimeout };
+                if ((await locator.count()) !== 1)
+                    throw new Halt('按键目标不明确', `无法唯一定位按键目标「${spec.target}」`);
+                await locator.focus(timeout);
+                const focused = await locator.evaluate(
+                    (element) => element.getRootNode().activeElement === element,
+                    undefined,
+                    timeout,
+                );
+                if (!focused)
+                    throw new Halt('按键目标无法聚焦', `无法聚焦按键目标「${spec.target}」`);
+                control = { name: spec.target, role: spec.role };
+            }
             await this.page.keyboard.press(spec.value);
             await settle(this.page, this.config.delay);
         } else if (verb === 'click') {

@@ -90,8 +90,15 @@ export function describe(step) {
             verb: 'hover',
             target: q[0] || step.replace(/^(悬停(?:在)?|hover(?: over)?)\s*/i, ''),
         };
-    if ((m = step.match(/^(?:按下|press)\s*(Enter|Escape|Tab|ArrowDown|ArrowUp)$/i)))
-        return { verb: 'press', value: m[1] };
+    if (
+        (m = step.match(
+            /^(?:按下|press)\s*(Enter|Escape|Tab|ArrowDown|ArrowUp)(?:（(角色 ([a-z]+) 名称|标签|占位符|文本)(精确匹配|包含)「([^」]+)」）)?$/i,
+        ))
+    ) {
+        const [, value, locator, role, match, target] = m;
+        if (!locator) return { verb: 'press', value };
+        return { verb: 'press', value, target, locator, role, exact: match === '精确匹配' };
+    }
     if ((m = step.match(/^点击第\s*([1-9][0-9]{0,2}|1000)\s*个「([^」]+)」按钮$/)))
         return { verb: 'click', target: m[2], ordinal: Number(m[1]) };
     if (/^(点击|单击|再点击|切换|选择|进入|打开|click\b|open\b|go to\b)/i.test(step)) {

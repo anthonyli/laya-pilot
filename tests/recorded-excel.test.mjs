@@ -55,7 +55,7 @@ test('stray modifier keys are skipped, replayable keys become steps, others stay
     );
     const steps = lines(converted.steps);
     assert.equal(steps.length, 3);
-    assert.equal(steps[2], '按下 Enter');
+    assert.equal(steps[2], '按下 Enter（占位符包含「请输入客户名称」）');
     // The Excel executor understands the converted key step.
     assert.equal(describe(steps[2]).verb, 'press');
     assert.deepEqual(converted.skipped, ['第 6 行按下 CapsLock（不影响页面）']);
@@ -63,5 +63,38 @@ test('stray modifier keys are skipped, replayable keys become steps, others stay
         () => recordedCase(recording(`await page.getByPlaceholder('名称').press('Control+a');`)),
         (error) =>
             /第 4 行无法转换/.test(error.message) && /press\('Control\+a'\)/.test(error.message),
+    );
+});
+
+test('legacy key export preserves the locator type and its string matching mode', () => {
+    const { steps } = recordedCase(
+        recording(`
+        await page.getByRole('textbox', { name: '第二项', exact: true }).press('ArrowDown');
+        await page.getByLabel('Search').press('Escape');
+        await page.getByText('Next').press('Tab');
+    `),
+    );
+    assert.deepEqual(lines(steps).slice(1), [
+        '按下 ArrowDown（角色 textbox 名称精确匹配「第二项」）',
+        '按下 Escape（标签包含「Search」）',
+        '按下 Tab（文本包含「Next」）',
+    ]);
+    assert.deepEqual(describe(lines(steps)[1]), {
+        verb: 'press',
+        value: 'ArrowDown',
+        locator: '角色 textbox 名称',
+        role: 'textbox',
+        target: '第二项',
+        exact: true,
+    });
+    assert.deepEqual(describe('按下 Escape'), { verb: 'press', value: 'Escape' });
+    assert.throws(
+        () =>
+            recordedCase(
+                recording(
+                    `await page.getByRole('textbox', { name: 'A', exact: flag }).press('Tab');`,
+                ),
+            ),
+        /无法转换/,
     );
 });
