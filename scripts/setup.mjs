@@ -96,24 +96,36 @@ function check(local, resolved) {
 }
 
 /**
- * Use a browser already on this computer when there is one (Playwright's Chromium,
- * then Chrome, then Edge); download Chromium only when none is found.
+ * Honour the configured channel. With no choice, reuse an installed browser or
+ * download Playwright Chromium.
  */
 async function prepareBrowser() {
     const root = playwrightRoot();
     if (!root) throw Error('Playwright is missing. Reinstall LayaPilot with npm.');
     const configured = configuredChannel();
     if (configured && browserAvailable(configured)) return `${browserName(configured)}（已配置）`;
-    if (configured) console.log(`    ${browserName(configured)} 未安装，改为查找本机其他浏览器。`);
-    const found = chooseInstalledBrowser();
+    if (configured && configured !== 'chromium') {
+        throw Error(
+            `BROWSER_CHANNEL=${configured}（${browserName(configured)}）不可用。请安装指定浏览器，或清除环境变量及 ${envPath} 中的 BROWSER_CHANNEL 后重新运行 setup。环境变量优先。`,
+        );
+    }
+    // Even an empty shell override wins over a channel saved in .env.local.
+    const found =
+        process.env.BROWSER_CHANNEL === undefined
+            ? chooseInstalledBrowser()
+            : browserAvailable('chromium')
+              ? 'chromium'
+              : null;
     if (found === 'chromium') return `${browserName(found)}（已安装）`;
     if (found) {
         // Stored in .env.local so Excel runs, recording and replay all use it.
-        if (!configured) await rememberSetting(envPath, 'BROWSER_CHANNEL', found);
+        if (!(await rememberSetting(envPath, 'BROWSER_CHANNEL', found)))
+            throw Error(`BROWSER_CHANNEL 已配置，请核对 ${envPath} 后重新运行 setup。`);
         return `${browserName(found)}（本机已安装，无需下载）`;
     }
-    console.log('    本机没有可用的 Chrome、Edge 或 Chromium，下载 Playwright Chromium…');
+    console.log('    下载 Playwright Chromium…');
     await run(process.execPath, [path.join(root, 'cli.js'), 'install', 'chromium']);
+    if (!browserAvailable('chromium')) throw Error('安装后仍未找到 Playwright Chromium。');
     return `${browserName('chromium')}（已下载）`;
 }
 
