@@ -398,7 +398,7 @@ export async function latestReportIndex(cwd = process.cwd()) {
         if (path.isAbsolute(directory)) {
             // Legacy default runs were stored as absolute paths. Check for the same run in
             // this project before following an old pointer to a still-accessible project.
-            if (!isProjectRelative(path.relative(cwd, directory))) {
+            if (latest.version === undefined && !isProjectRelative(path.relative(cwd, directory))) {
                 const parts = path.normalize(directory).split(path.sep);
                 const runRoot = parts.findLastIndex(
                     (part, index) => part === 'laya-pilot' && parts[index - 1] === 'runs',
@@ -453,6 +453,7 @@ export async function finalizeRun(out, cwd = process.cwd()) {
     const pointer = isProjectRelative(relative) ? relative || '.' : directory;
     try {
         writePrivateJson(latest, {
+            version: 2,
             directory: pointer,
             index: path.join(pointer, RUN_FILES.index),
             verdict: assessment.verdict.text,

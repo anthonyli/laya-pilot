@@ -141,7 +141,8 @@ test('latest report stays with a copied or moved project and preserves external 
     assert.equal(await latestReportIndex(moved), index(moved));
     assert.equal(await latestReportIndex(copy), index(copy));
 
-    const external = path.join(temp, 'external');
+    // A new external pointer is explicit even when its path looks like the old default.
+    const external = path.join(temp, 'external', relative);
     await makeReport(external, moved);
     assert.equal(await latestReportIndex(moved), path.join(external, 'index.html'));
     assert.equal(JSON.parse(await fs.readFile(latest(moved), 'utf8')).directory, external);
