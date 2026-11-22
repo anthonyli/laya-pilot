@@ -17,6 +17,7 @@ const recordedRoles = {
     combobox: '下拉框',
     menuitem: '菜单项',
 };
+const locatorLabels = { getByLabel: '标签', getByPlaceholder: '占位符', getByText: '文本' };
 
 // Keys the Excel executor can replay as "按下 KEY".
 const replayableKeys = new Set(['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp']);
@@ -189,8 +190,22 @@ export function recordedCase(source) {
                 continue;
             }
             if (!replayableKeys.has(key) || ordinal !== null) unsupported(call);
-            // The executor presses the key on the focused element, which the recorded locator just used.
-            steps.push(`按下 ${key}`);
+            let exact = false;
+            const locatorMethod = method(object);
+            if (locatorMethod === 'getByRole') {
+                const { properties } = object.arguments[1];
+                const names = properties.filter((property) => property.key.name === 'name');
+                const exacts = properties.filter((property) => property.key.name === 'exact');
+                if (
+                    names.length !== 1 ||
+                    exacts.length > 1 ||
+                    (exacts.length && typeof exacts[0].value?.value !== 'boolean')
+                )
+                    unsupported(call);
+                exact = exacts[0]?.value.value === true;
+            }
+            const label = locatorLabels[locatorMethod] ?? `角色 ${role} 名称`;
+            steps.push(`按下 ${key}（${label}${exact ? '精确匹配' : '包含'}「${name}」）`);
             continue;
         }
         if (action === 'fill' && role === 'textbox' && call.arguments.length === 1) {
