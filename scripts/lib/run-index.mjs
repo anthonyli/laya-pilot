@@ -381,6 +381,10 @@ async function reportFile(index) {
     }
 }
 
+function isProjectRelative(directory) {
+    return !path.isAbsolute(directory) && directory.split(path.sep)[0] !== '..';
+}
+
 export async function latestReportIndex(cwd = process.cwd()) {
     const root = projectRunsDirectory(cwd);
     let latest;
@@ -389,9 +393,27 @@ export async function latestReportIndex(cwd = process.cwd()) {
     } catch (error) {
         if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
     }
-    if (typeof latest?.directory === 'string' && path.isAbsolute(latest.directory)) {
-        const index = path.join(latest.directory, RUN_FILES.index);
-        if (await reportFile(index)) return index;
+    const directory = latest?.directory;
+    if (typeof directory === 'string' && directory) {
+        if (path.isAbsolute(directory)) {
+            // Legacy default runs were stored as absolute paths. Check for the same run in
+            // this project before following an old pointer to a still-accessible project.
+            if (!isProjectRelative(path.relative(cwd, directory))) {
+                const parts = path.normalize(directory).split(path.sep);
+                const runRoot = parts.findLastIndex(
+                    (part, index) => part === 'laya-pilot' && parts[index - 1] === 'runs',
+                );
+                if (runRoot >= 0) {
+                    const copied = path.join(root, ...parts.slice(runRoot + 1), RUN_FILES.index);
+                    if (await reportFile(copied)) return copied;
+                }
+            }
+            const index = path.join(directory, RUN_FILES.index);
+            if (await reportFile(index)) return index;
+        } else if (isProjectRelative(path.normalize(directory))) {
+            const index = path.resolve(cwd, directory, RUN_FILES.index);
+            if (await reportFile(index)) return index;
+        }
     }
 
     // Older or moved projects may have reports without a usable latest pointer.
@@ -427,10 +449,12 @@ export async function finalizeRun(out, cwd = process.cwd()) {
     );
     const latest = path.join(projectRunsDirectory(cwd), LATEST_RUN);
     const directory = path.resolve(out);
+    const relative = path.relative(cwd, directory);
+    const pointer = isProjectRelative(relative) ? relative || '.' : directory;
     try {
         writePrivateJson(latest, {
-            directory,
-            index: path.join(directory, RUN_FILES.index),
+            directory: pointer,
+            index: path.join(pointer, RUN_FILES.index),
             verdict: assessment.verdict.text,
             passed: assessment.passed,
             failed: assessment.failed,

@@ -111,6 +111,42 @@ test('finalizeRun writes an index that links every screenshot and a summary', as
     assert.equal(await latestReportIndex(cwd), path.join(out, 'index.html'));
 });
 
+test('latest report stays with a copied or moved project and preserves external outputs', async (t) => {
+    const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-portable-report-'));
+    t.after(() => fs.rm(temp, { recursive: true, force: true }));
+    const original = path.join(temp, 'original');
+    const copy = path.join(temp, 'copy');
+    const moved = path.join(temp, 'moved');
+    const relative = path.join('runs', 'laya-pilot', 'first-run');
+    const out = path.join(original, relative);
+    const makeReport = async (output, cwd) => {
+        await fs.mkdir(output, { recursive: true });
+        await fs.writeFile(path.join(output, 'results.json'), JSON.stringify({ results: [] }));
+        await finalizeRun(output, cwd);
+    };
+    const latest = (cwd) => path.join(projectRunsDirectory(cwd), 'latest.json');
+    const index = (cwd) => path.join(cwd, relative, 'index.html');
+
+    await makeReport(out, original);
+    const pointer = JSON.parse(await fs.readFile(latest(original), 'utf8'));
+    assert.equal(pointer.directory, relative);
+    assert.equal(pointer.index, path.join(relative, 'index.html'));
+    await fs.cp(original, copy, { recursive: true });
+    assert.equal(await latestReportIndex(original), index(original));
+    assert.equal(await latestReportIndex(copy), index(copy));
+
+    await fs.writeFile(latest(copy), JSON.stringify({ directory: out, index: index(original) }));
+    assert.equal(await latestReportIndex(copy), index(copy));
+    await fs.rename(original, moved);
+    assert.equal(await latestReportIndex(moved), index(moved));
+    assert.equal(await latestReportIndex(copy), index(copy));
+
+    const external = path.join(temp, 'external');
+    await makeReport(external, moved);
+    assert.equal(await latestReportIndex(moved), path.join(external, 'index.html'));
+    assert.equal(JSON.parse(await fs.readFile(latest(moved), 'utf8')).directory, external);
+});
+
 test(
     'report opens the project latest and can still open a specific run',
     { skip: process.platform === 'win32' },
