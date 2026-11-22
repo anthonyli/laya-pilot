@@ -372,12 +372,20 @@ function installRecorder({ origin, binding, snapshotKey }) {
             const element = event.composedPath()[0];
             if (!(element instanceof Element) || privateField(element, identify(element))) return;
             if (element.matches('select')) {
-                if (element.multiple) emit({ kind: 'unsupported', reason: '暂不支持多选下拉框。' });
-                else
-                    record(
-                        { kind: 'select', value: visibleText(element.selectedOptions[0]) },
-                        element,
-                    );
+                if (element.multiple) {
+                    emit({ kind: 'unsupported', reason: '暂不支持多选下拉框。' });
+                    return;
+                }
+                const label = element.selectedOptions[0]?.label;
+                if (
+                    label === undefined ||
+                    label.length > 500 ||
+                    [...element.options].filter((option) => option.label === label).length !== 1
+                ) {
+                    emit({ kind: 'unsupported', reason: '无法按显示标签唯一回放下拉选项。' });
+                    return;
+                }
+                record({ kind: 'select', value: label }, element);
             } else if (element.matches('input[type=checkbox], input[type=radio]')) {
                 record({ kind: element.checked ? 'check' : 'uncheck' }, element);
             } else if (element.matches('input[type=range]'))
