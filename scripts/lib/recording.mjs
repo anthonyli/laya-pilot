@@ -280,16 +280,27 @@ async function replay(root, input, options) {
                 return null;
             });
         const stats = result ? JSON.parse(result).stats : null;
-        if (result) await finalizeRun(out).catch(() => {});
-        const hasResults =
-            stats && stats.expected + stats.unexpected + stats.skipped + stats.flaky > 0;
+        const finalized = result ? await finalizeRun(out).catch(() => null) : null;
+        const assessment = finalized?.assessment;
+        const counts =
+            assessment ??
+            (stats && {
+                passed: stats.expected,
+                failed: stats.unexpected,
+                skipped: stats.skipped,
+                flaky: stats.flaky,
+                total: stats.expected + stats.unexpected + stats.skipped + stats.flaky,
+            });
         const summary =
-            hasResults &&
-            `${stats.expected} passed · ${stats.unexpected} failed · ${stats.skipped} skipped${stats.flaky ? ` · ${stats.flaky} flaky` : ''}`;
-        printPanel('Replay', resultLabel(code, code === 0 ? 'Run complete' : 'Run did not pass'), [
+            counts?.total > 0 &&
+            `${counts.passed} passed · ${counts.failed} failed · ${counts.skipped} skipped${counts.flaky ? ` · ${counts.flaky} flaky` : ''}`;
+        const label = assessment
+            ? resultLabel(Number(assessment.verdict.level !== 'ok'), assessment.verdict.text)
+            : resultLabel(code, code === 0 ? 'Run complete' : 'Run did not pass');
+        printPanel('Replay', label, [
             ...(summary ? [['RESULT', [summary]]] : []),
             ['RUN DIRECTORY', [out]],
-            ...(stats ? [['REPORT', [path.join(out, RUN_FILES.index), cmd('report')]]] : []),
+            ...(assessment ? [['REPORT', [path.join(out, RUN_FILES.index), cmd('report')]]] : []),
         ]);
         return code;
     });

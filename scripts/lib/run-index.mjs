@@ -10,7 +10,7 @@ import { eventLabel } from './diagnostics.mjs';
 // into one view: a reliability verdict, then every case with its timeline and
 // screenshots. index.html references files in the directory; it is not inlined.
 
-const PASS = new Set(['通过', '已验证', '已完成', 'passed', 'expected']);
+const PASS = new Set(['通过', '已验证', '已完成', '预期失败', 'passed', 'expected']);
 const FAIL = new Set(['失败', '未生成', 'failed', 'unexpected', 'timedOut']);
 const UNVERIFIED = new Set(['未验证', '待补证']);
 const NEUTRAL = new Set(['不适用', '未选择', '跳过', 'skipped']);
@@ -20,6 +20,7 @@ export function outcome(status = '') {
     if (FAIL.has(status)) return 'fail';
     if (UNVERIFIED.has(status)) return 'unverified';
     if (NEUTRAL.has(status)) return 'neutral';
+    if (status === '不稳定' || status === 'flaky') return 'flaky';
     return 'blocked'; // 阻断, 中断, 未执行…, 未完成, interrupted
 }
 
@@ -120,28 +121,67 @@ const PLAYWRIGHT_STATUS = {
 
 function fromPlaywright(report, out) {
     const relative = (file) => (file ? path.relative(out, file).split(path.sep).join('/') : '');
+    const statusLabel = (status) => PLAYWRIGHT_STATUS[status] || status || '未完成';
     const cases = [];
     const walk = (suite, trail) => {
         for (const spec of suite.specs || [])
             for (const t of spec.tests || []) {
-                const last = t.results?.at(-1) || {};
-                const attachments = (last.attachments || []).filter((a) => a.path);
-                const shots = attachments.filter((a) => a.contentType?.startsWith('image/'));
+                const results = t.results || [];
+                const retried = results.length > 1;
+                const attempts = results.map((result, index) => {
+                    const label = `第 ${index + 1} 次尝试`;
+                    const files = (result.attachments || []).filter((a) => a.path);
+                    const screenshot = files.findLast((a) => a.contentType?.startsWith('image/'));
+                    const errors = (result.errors || []).map((e) => e.message).filter(Boolean);
+                    return { result, label, files, screenshot, errors };
+                });
+                const last = attempts.at(-1);
+                const evidence = attempts.flatMap((a) => a.files);
+                const trace = evidence.findLast((a) => a.name === 'trace');
+                const evidenceFile = attempts.findLast((a) => a.screenshot)?.screenshot || trace;
+                const status =
+                    t.status === 'expected' && t.expectedStatus === 'failed'
+                        ? '预期失败'
+                        : statusLabel(t.status || last?.result.status);
                 cases.push({
                     id: String(cases.length + 1).padStart(3, '0'),
                     title: [...trail, spec.title].filter(Boolean).join(' › '),
                     location: `${spec.file}:${spec.line}`,
-                    status: PLAYWRIGHT_STATUS[last.status || t.status] || last.status || t.status,
-                    reason: (last.errors || []).map((e) => e.message).join('\n'),
-                    directory: shots[0] ? path.posix.dirname(relative(shots[0].path)) : '',
-                    durationMs: last.duration,
-                    screenshot: relative(shots.at(-1)?.path),
-                    timeline: (last.steps || []).map((s) => ({
-                        label: s.title,
-                        status: s.error ? '失败' : '通过',
-                    })),
-                    attachments: attachments.map((a) => ({ name: a.name, path: relative(a.path) })),
-                    trace: relative(attachments.find((a) => a.name === 'trace')?.path),
+                    status,
+                    reason: attempts
+                        .flatMap((a) =>
+                            a.errors.map((error) => (retried ? `${a.label}：${error}` : error)),
+                        )
+                        .join('\n'),
+                    directory: evidenceFile ? path.posix.dirname(relative(evidenceFile.path)) : '',
+                    durationMs:
+                        last && results.reduce((sum, result) => sum + (result.duration || 0), 0),
+                    screenshot: relative(last?.screenshot?.path),
+                    timeline: attempts.flatMap(({ result, label, screenshot }, index) => [
+                        ...(retried
+                            ? [
+                                  {
+                                      label,
+                                      status: statusLabel(result.status),
+                                      screenshot:
+                                          index < attempts.length - 1
+                                              ? relative(screenshot?.path)
+                                              : '',
+                                  },
+                              ]
+                            : []),
+                        ...(result.steps || []).map((s) => ({
+                            label: s.title,
+                            status: s.error ? '失败' : '通过',
+                        })),
+                    ]),
+                    attachments: attempts.flatMap((a) =>
+                        a.files.map((file) => ({
+                            name: retried ? `${a.label} · ${file.name}` : file.name,
+                            path: relative(file.path),
+                        })),
+                    ),
+                    trace: relative(trace?.path),
                     assertions: [],
                     checks: [],
                     events: [],
@@ -155,7 +195,9 @@ function fromPlaywright(report, out) {
         kind: '录制回放（Playwright）',
         source: report.config?.rootDir,
         cases,
-        warnings: (report.errors || []).map((e) => e.message),
+        error: report.errors?.length
+            ? { message: report.errors.map((e) => e.message).join('\n') }
+            : null,
         externalReport: 'playwright-report/index.html',
     };
 }
@@ -169,6 +211,9 @@ export function assess(view) {
     const passed = tally('pass');
     const failed = tally('fail');
     const blocked = tally('blocked');
+    const flaky = tally('flaky');
+    const skipped = count(cases, (c) => c.status === '跳过' || c.status === 'skipped');
+    const allSkipped = skipped > 0 && skipped === cases.length;
     const unverifiedCases = tally('unverified');
     const assertions = cases.flatMap((c) => c.assertions);
     const unverified = count(assertions, (a) => outcome(a.status) === 'unverified');
@@ -182,6 +227,9 @@ export function assess(view) {
     if (view.error) add('bad', `运行没有正常完成：${view.error.message ?? view.error}`);
     if (!cases.length && !view.error) add('bad', '没有执行任何用例。');
     if (failed) add('bad', `${failed} 条用例失败，先看下方标红的用例。`);
+    if (allSkipped) add('warn', `全部 ${skipped} 条用例均被跳过，没有实际执行。`);
+    else if (skipped) add('info', `${skipped} 条用例被跳过。`);
+    if (flaky) add('warn', `${flaky} 条用例结果不稳定，请查看重试和前次失败证据。`);
     if (blocked)
         add('warn', `${blocked} 条用例被阻断或没有执行完，它们的结论不代表页面功能是否正确。`);
     if (unverifiedCases || unverified)
@@ -208,12 +256,26 @@ export function assess(view) {
 
     const verdict = signals.some((s) => s.level === 'bad')
         ? { level: 'bad', text: '未通过' }
-        : signals.some((s) => s.level === 'warn')
-          ? { level: 'warn', text: '通过，但需要复核' }
-          : { level: 'ok', text: '通过，证据完整' };
+        : allSkipped
+          ? { level: 'warn', text: '未执行' }
+          : flaky
+            ? { level: 'warn', text: '结果不稳定，需要复核' }
+            : signals.some((s) => s.level === 'warn')
+              ? { level: 'warn', text: '通过，但需要复核' }
+              : { level: 'ok', text: '通过，证据完整' };
     if (!signals.length)
         add('ok', '全部用例通过，没有发现阻断、未验证预期、执行错误或缺失的截图。');
-    return { verdict, signals, passed, failed, blocked, unverified, total: cases.length };
+    return {
+        verdict,
+        signals,
+        passed,
+        failed,
+        blocked,
+        flaky,
+        skipped,
+        unverified,
+        total: cases.length,
+    };
 }
 
 export async function readRun(out) {
@@ -245,7 +307,7 @@ const localDate = (iso) => {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
 const href = (file) => file.split('/').map(encodeURIComponent).join('/');
-const ORDER = { fail: 0, blocked: 1, unverified: 2, neutral: 3, pass: 4 };
+const ORDER = { fail: 0, flaky: 1, blocked: 2, unverified: 3, neutral: 4, pass: 5 };
 
 function caseHtml(c) {
     const kind = outcome(c.status);
@@ -305,8 +367,8 @@ body{max-width:1100px;margin:0 auto;padding:24px}h1{margin:0 0 4px}small{color:v
 .verdict{border-left:6px solid;padding:12px 16px;margin:16px 0;background:#f6f8fa}.verdict.ok{border-color:var(--ok)}.verdict.bad{border-color:var(--bad)}.verdict.warn{border-color:var(--warn)}
 .verdict h2{margin:0 0 8px}.signals{margin:0;padding-left:20px}.signals .bad{color:var(--bad)}.signals .warn{color:var(--warn)}.signals .info{color:var(--info)}.signals .ok{color:var(--ok)}
 .stats{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.stat{border:1px solid var(--line);border-radius:6px;padding:8px 16px;min-width:90px}.stat b{display:block;font-size:24px}.stat.fail b{color:var(--bad)}.stat.pass b{color:var(--ok)}.stat.blocked b,.stat.unverified b{color:var(--warn)}
-.case{border:1px solid var(--line);border-radius:6px;margin:8px 0;padding:8px 12px}.case.fail{border-color:var(--bad)}.case.blocked,.case.unverified{border-color:var(--warn)}
-summary{cursor:pointer}.badge{display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;color:#fff;background:var(--info)}.badge.pass{background:var(--ok)}.badge.fail{background:var(--bad)}.badge.blocked,.badge.unverified{background:var(--warn)}
+.case{border:1px solid var(--line);border-radius:6px;margin:8px 0;padding:8px 12px}.case.fail{border-color:var(--bad)}.case.flaky,.case.blocked,.case.unverified{border-color:var(--warn)}
+summary{cursor:pointer}.badge{display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;color:#fff;background:var(--info)}.badge.pass{background:var(--ok)}.badge.fail{background:var(--bad)}.badge.flaky,.badge.blocked,.badge.unverified{background:var(--warn)}
 .reason{white-space:pre-wrap}.note{color:var(--warn)}.issues{color:var(--bad)}
 .timeline{list-style:none;padding:0}.timeline li{border-top:1px solid var(--line);padding:8px 0;display:grid;grid-template-columns:1fr 280px;gap:12px;align-items:start}.timeline img{max-height:180px;object-fit:cover;object-position:top;width:100%}.timeline li.fail .step b{color:var(--bad)}
 img{max-width:100%;border:1px solid var(--line);border-radius:4px}.final{margin-top:8px}.final img{max-width:480px;max-height:360px;object-fit:cover;object-position:top;display:block}
@@ -316,7 +378,7 @@ img{max-width:100%;border:1px solid var(--line);border-radius:4px}.final{margin-
 <small>${escape(view.kind)}${view.source ? ' · ' + escape(view.source) : ''}${view.provider ? ' · 模型：' + escape(view.provider) : ''} · 生成于 ${escape(new Date().toLocaleString('zh-CN'))}</small>
 <section class="verdict ${verdict.level}"><h2>${escape(verdict.text)}</h2>
 <ul class="signals">${signals.map((s) => `<li class="${s.level}">${escape(s.text)}</li>`).join('')}</ul></section>
-<div class="stats">${stat('用例', assessment.total, '')}${stat('通过', assessment.passed, 'pass')}${stat('失败', assessment.failed, 'fail')}${stat('阻断/未完成', assessment.blocked, 'blocked')}${stat('未验证预期', assessment.unverified, 'unverified')}</div>
+<div class="stats">${stat('用例', assessment.total, '')}${stat('通过', assessment.passed, 'pass')}${stat('失败', assessment.failed, 'fail')}${assessment.flaky ? stat('不稳定', assessment.flaky, 'blocked') : ''}${assessment.skipped ? stat('跳过', assessment.skipped, '') : ''}${stat('阻断/未完成', assessment.blocked, 'blocked')}${stat('未验证预期', assessment.unverified, 'unverified')}</div>
 ${view.error?.screenshot && !view.cases.some((c) => c.screenshot === view.error.screenshot) ? `<p>运行失败时的页面：<br><img src="${href(view.error.screenshot)}" style="max-width:480px"></p>` : ''}
 ${view.externalReport ? `<p>Playwright 原始报告：<a href="${href(view.externalReport)}">${escape(view.externalReport)}</a></p>` : ''}
 <h2>用例</h2>
@@ -340,7 +402,14 @@ export function renderSummary(view, assessment) {
         '',
         ...assessment.signals.map((s) => `- ${s.text}`),
         '',
-        `通过 ${assessment.passed}，失败 ${assessment.failed}，阻断/未完成 ${assessment.blocked}，共 ${assessment.total}。`,
+        [
+            `通过 ${assessment.passed}`,
+            `失败 ${assessment.failed}`,
+            ...(assessment.flaky ? [`不稳定 ${assessment.flaky}`] : []),
+            ...(assessment.skipped ? [`跳过 ${assessment.skipped}`] : []),
+            `阻断/未完成 ${assessment.blocked}`,
+            `共 ${assessment.total}。`,
+        ].join('，'),
         '',
         '|编号|用例|结果|原因|证据|',
         '|---|---|---|---|---|',
@@ -436,6 +505,8 @@ export async function finalizeRun(out, cwd = process.cwd()) {
             failed: assessment.failed,
             blocked: assessment.blocked,
             total: assessment.total,
+            flaky: assessment.flaky,
+            skipped: assessment.skipped,
         });
     } catch (error) {
         console.warn(`Could not update latest report (${error.code || error.message}): ${latest}`);
