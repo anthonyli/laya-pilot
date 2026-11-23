@@ -2,8 +2,11 @@ import { randomBytes } from 'node:crypto';
 
 const REF = 'data-laya-form-ref';
 // 弹窗根选择器：与 dom.mjs / workflow.mjs 的模态判定同族，使用标准语义与已支持的组件容器
-const ROOT_SEL =
-    'dialog[open],[role="dialog"],[role="alertdialog"],[data-slot="dialog-content"],[data-slot="alert-dialog-content"],.ant-drawer-open .ant-drawer-content,.el-dialog';
+const semanticDialogs = 'dialog[open],[role="dialog"],[role="alertdialog"]';
+const drawerContent = '.ant-drawer-open .ant-drawer-content';
+const ROOT_SEL = `${semanticDialogs},[data-slot="dialog-content"],[data-slot="alert-dialog-content"],${drawerContent},.el-dialog`;
+// Ant 3 drawers lack a dialog role. Newer versions can put it on the wrapper or its content.
+export const recordedDialogSelector = `${semanticDialogs},${drawerContent}:not(:is(${semanticDialogs}) *):not(:has(${semanticDialogs}))`;
 const visible = (e) => {
     const r = e.getBoundingClientRect(),
         s = getComputedStyle(e);

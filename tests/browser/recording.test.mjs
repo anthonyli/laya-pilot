@@ -10,11 +10,201 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
 import { captureRecording } from '../../scripts/lib/recording-capture.mjs';
+import { generateRecordedCases } from '../../scripts/lib/recording-cases.mjs';
+import { attachRecordedCases, exportRecording } from '../../scripts/lib/recorded-excel.mjs';
+import { lines } from '../../scripts/lib/language.mjs';
 import { renderRecordingSpec } from '../../scripts/lib/recording-spec.mjs';
+import { Engine } from '../../scripts/lib/engine.mjs';
 
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL('../../scripts/run.mjs', import.meta.url));
 const require = createRequire(import.meta.url);
+
+test('recorded form steps target the open Ant drawer across legacy and role-based markup', async (t) => {
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.setContent(`<textarea aria-label="Description">background</textarea>
+        <div class="ant-drawer-open"><div class="ant-drawer-content">
+            <textarea aria-label="Description"></textarea></div></div>`);
+    const engine = new Engine(page, null, { delay: 0 });
+    for (const version of ['legacy', 'semantic']) {
+        if (version === 'semantic')
+            await page
+                .locator('.ant-drawer-open')
+                .evaluate((el) => el.setAttribute('role', 'dialog'));
+        await engine.step(`在弹窗的「Description」输入框中输入「${version}」`);
+        assert.equal(await page.locator('.ant-drawer-content textarea').inputValue(), version);
+    }
+    assert.equal(await page.locator('body > textarea').inputValue(), 'background');
+});
+
+test('records a portal tooltip as a menu name and binds repeated action icons to the clicked row', async (t) => {
+    const svg = '<svg width="24" height="24"><rect width="24" height="24"/></svg>';
+    const html = `<style>nav div,td span{display:inline-block;cursor:pointer} [role=tooltip]{pointer-events:none}</style>
+        <nav><div data-tip="Overview">${svg}</div><div data-tip="Indicator Center">${svg}</div>
+        <a href="#list" hidden>Realtime Indicator</a></nav><button>Realtime</button>
+        <table><thead><tr><th>ID</th><th>Actions</th></tr></thead><tbody>
+        ${['First', 'Second'].map((id) => `<tr><td>${id}</td><td><span title="Delete">${svg}</span></td></tr>`).join('')}
+        </tbody></table><script>
+        for(const item of document.querySelectorAll('[data-tip]')){
+          item.onpointerenter=()=>{const tip=document.createElement('div');tip.setAttribute('role','tooltip');tip.textContent=item.dataset.tip;document.body.append(tip)};
+          item.onpointerleave=()=>document.querySelector('[role=tooltip]')?.remove();
+          item.onclick=()=>{if(item.dataset.tip==='Indicator Center')document.querySelector('a').hidden=false};
+        }
+        for(const item of document.querySelectorAll('td span')) item.onclick=()=>{document.body.dataset.clicked=item.closest('tr').cells[0].textContent};
+        </script>`;
+    const server = http.createServer((_, response) =>
+        response.writeHead(200, { 'Content-Type': 'text/html' }).end(html),
+    );
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => {
+        server.closeAllConnections();
+        return new Promise((resolve) => server.close(resolve));
+    });
+    const url = `http://127.0.0.1:${server.address().port}/`;
+    const recording = await captureRecording({
+        playwright: { chromium },
+        url,
+        headless: true,
+        async onReady(page) {
+            const item = page.locator('[data-tip="Indicator Center"]');
+            await item.hover();
+            await page.getByRole('tooltip').filter({ hasText: 'Indicator Center' }).waitFor();
+            await item.click();
+            await page.getByRole('link', { name: 'Realtime Indicator' }).click();
+            await page
+                .getByRole('row')
+                .filter({ hasText: 'Second' })
+                .locator('[title=Delete]')
+                .click();
+            await page.getByRole('button', { name: '完成录制' }).click();
+        },
+    });
+    const steps = generateRecordedCases(recording).cases.flatMap((entry) => lines(entry.steps));
+    assert.ok(steps.includes('展开「Indicator Center」导航菜单'));
+    const bind = '在「ID」列中定位值为「Second」的唯一记录';
+    assert.deepEqual(steps.slice(-2), [bind, '点击操作图标「Delete」']);
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-icon-recording-'));
+    t.after(() => fs.rm(dir, { recursive: true, force: true }));
+    await fs.writeFile(path.join(dir, 'icons.spec.cjs'), renderRecordingSpec(recording));
+    await exec(process.execPath, [cli, 'replay', 'icons.spec.cjs', '--out', 'report'], {
+        cwd: dir,
+        env: { ...process.env, LAYA_HOME: path.join(dir, 'runtime'), BROWSER_CHANNEL: '' },
+    });
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.goto(url);
+    const config = {
+        url,
+        origins: [new URL(url).origin],
+        delay: 0,
+        pageTimeout: 2500,
+        assertTimeout: 300,
+        allowWrite: false,
+    };
+    const engine = new Engine(page, null, config);
+    await assert.rejects(engine.step('点击「Realtime Indicator」链接'), /无法唯一定位/);
+    await engine.step('展开「Indicator Center」导航菜单');
+    await engine.step('点击「Realtime Indicator」链接');
+    await engine.step(bind);
+    await assert.rejects(engine.step('点击操作图标「Delete」'), /只读/);
+    assert.equal(await page.locator('body').getAttribute('data-clicked'), null);
+    config.allowWrite = true;
+    await engine.step('点击操作图标「Delete」');
+    assert.equal(await page.locator('body').getAttribute('data-clicked'), 'Second');
+    await assert.rejects(engine.step('点击操作图标「Delete」'), /无法唯一定位/);
+});
+
+test('records through login and reload, retains unresolved steps, and moves the toolbar off page controls', async (t) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-ordered-recording-'));
+    const server = http.createServer((request, response) => {
+        response.setHeader('Content-Type', 'text/html; charset=utf-8');
+        response.end(
+            request.url === '/login'
+                ? '<form action="/index/realtime"><input aria-label="Account"><input type="password" aria-label="Password"><button>Login</button></form>'
+                : `<button style="position:fixed;right:12px;bottom:12px;width:220px;height:44px">Edit Area</button>
+               <button role="tab" style="position:fixed;right:12px;top:12px;width:220px;height:44px">Run Area</button>
+               <div tabindex="0">Custom widget</div><button>Add</button><button>Cancel</button>`,
+        );
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+        await fs.rm(dir, { recursive: true, force: true });
+    });
+    const url = `http://127.0.0.1:${server.address().port}/login`;
+    const recording = await captureRecording({
+        playwright: { chromium },
+        url,
+        headless: true,
+        async onReady(page) {
+            await page.getByLabel('Account').fill('tester');
+            await page.getByLabel('Password').pressSequentially('private-fixture');
+            await page.getByRole('button', { name: 'Login' }).click();
+            await page.waitForURL('**/index/realtime*');
+            const clickButton = (name) => page.getByRole('button', { name, exact: true }).click();
+            await clickButton('Edit Area');
+            await page.getByRole('button', { name: '添加检查点' }).press('Tab');
+            await page.getByRole('button', { name: '移至底部' }).press('Enter');
+            await page.getByRole('tab', { name: 'Run Area' }).click();
+            await page.getByText('Custom widget').click();
+            await page.reload();
+            await page.getByRole('button', { name: '移至顶部' }).waitFor();
+            await clickButton('移至顶部');
+            await clickButton('Edit Area');
+            await clickButton('Add');
+            for (let i = 0; i < 25; i++) await clickButton('Cancel');
+            await clickButton('完成录制');
+        },
+    });
+    const generated = generateRecordedCases(recording);
+    assert.deepEqual(
+        generated.cases.map((item) => item.title),
+        ['登录', '区域切换', '新增配置'],
+    );
+    const steps = generated.cases.flatMap((item) => lines(item.steps));
+    assert.deepEqual(steps, [
+        `打开网址 ${url}`,
+        '在「Account」输入框中输入「tester」',
+        '待补录：敏感输入或文件操作需要独立的测试数据配置。',
+        '点击「Login」按钮',
+        '切换到「Edit Area」区域',
+        '切换到「Run Area」区域',
+        '待补录：可点击元素没有可识别的控件角色。',
+        `打开网址 ${new URL('/index/realtime?', url).href}`,
+        '切换到「Edit Area」区域',
+        '点击「Add」按钮',
+        ...Array(25).fill('点击「Cancel」按钮'),
+    ]);
+    const spec = attachRecordedCases(renderRecordingSpec(recording), generated);
+    assert.doesNotMatch(JSON.stringify(recording) + spec, /private-fixture/);
+    assert.match(
+        spec,
+        /throw new Error[\s\S]*Login[\s\S]*Edit Area[\s\S]*Run Area[\s\S]*throw new Error[\s\S]*page.goto[\s\S]*Edit Area[\s\S]*Cancel/,
+    );
+    const specFile = path.join(dir, 'sequence.spec.cjs');
+    const workbook = path.join(dir, 'sequence.xlsx');
+    await fs.writeFile(specFile, spec);
+    const python = process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3';
+    assert.deepEqual(await exportRecording(specFile, workbook, python), generated);
+    const reader = fileURLToPath(new URL('../../scripts', import.meta.url));
+    const { stdout } = await exec(
+        python,
+        [
+            '-c',
+            'import io, sys, json; sys.stdin = io.StringIO(""); from worker import read_excel; print(json.dumps([case["steps"] for case in read_excel(sys.argv[1])["cases"]]))',
+            workbook,
+        ],
+        { env: { ...process.env, PYTHONPATH: reader } },
+    );
+    assert.deepEqual(
+        JSON.parse(stdout),
+        generated.cases.map((item) => item.steps),
+    );
+});
 
 test('captures and replays native select options using their actual labels', async (t) => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-select-recording-'));
@@ -244,5 +434,134 @@ test('queued case', () => {});`,
         assert.equal(latest.passed, 1);
         assert.equal(latest.skipped, 1);
         assert.equal(latest.blocked, 2);
+    },
+);
+
+test(
+    'recorder and Excel replay verify separate sessions by origin and account',
+    { timeout: 60000 },
+    async (t) => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-site-auth-'));
+        t.after(() => fs.rm(root, { recursive: true, force: true }));
+        const { findRecordingAuth } = await import('../../scripts/lib/recording-auth.mjs');
+        let expire = false;
+        const start = async (site) => {
+            const server = http.createServer((req, res) => {
+                res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                if (req.url === '/app') {
+                    if (expire || !req.headers.cookie?.includes('session=' + site)) {
+                        res.writeHead(302, { Location: '/login' }).end();
+                        return;
+                    }
+                    res.end(
+                        '<h1>Dashboard</h1><button role="tab" onclick="document.querySelector(\'output\').textContent=\'Area ready\'">Run Area</button><output></output>',
+                    );
+                } else {
+                    res.end(`<form onsubmit="event.preventDefault();document.cookie='session=${site}; path=/';sessionStorage.setItem('site','${site}');location.href='/app'">
+                <input aria-label="Account"><input type="password"><button>Login</button></form>`);
+                }
+            });
+            await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+            t.after(async () => {
+                server.closeAllConnections();
+                await new Promise((ok) => server.close(ok));
+            });
+            return 'http://127.0.0.1:' + server.address().port + '/login';
+        };
+        const a = await start('first'),
+            b = await start('second');
+        const record = (url, options, onReady) =>
+            captureRecording({
+                url,
+                playwright: { chromium },
+                authRoot: root,
+                headless: true,
+                ...options,
+                onReady,
+            });
+        const login = async (url, account, options = {}) =>
+            record(url, options, async (page) => {
+                assert.equal(await page.locator('input[type=password]').count(), 1);
+                await page.getByLabel('Account').fill(account);
+                await page.locator('input[type=password]').fill('fixture-only');
+                await page.getByRole('button', { name: 'Login' }).click();
+                await page.waitForURL('**/app');
+                await page.getByRole('tab').click();
+                await page.getByRole('button', { name: '添加检查点' }).click();
+                await page.getByText('Area ready').click();
+                await page.getByRole('button', { name: '完成录制' }).click();
+            });
+        const initial = await login(a, 'tester');
+        const first = await findRecordingAuth(root, a, 'tester');
+        assert.ok(first);
+        assert.equal((await fs.stat(first.authState)).mode & 0o777, 0o600);
+        assert.doesNotMatch(await fs.readFile(first.authState, 'utf8'), /fixture-only/);
+        assert.equal(await findRecordingAuth(root, b), null);
+        await login(b, 'tester');
+        const second = await findRecordingAuth(root, b, 'tester');
+        assert.notEqual(first.authState, second.authState);
+        const reused = await record(a, {}, async (page) => {
+            assert.equal(new URL(page.url()).pathname, '/app');
+            assert.equal(await page.evaluate(() => sessionStorage.getItem('site')), 'first');
+            await page.getByRole('tab').click();
+            await page.getByRole('button', { name: '完成录制' }).click();
+        });
+        assert.equal(new URL(reused.url).pathname, '/app');
+        assert.equal(
+            JSON.parse(generateRecordedCases(reused).cases[0].data).recordedScene.account,
+            'tester',
+        );
+        const python = process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3';
+        const project = fileURLToPath(new URL('../../', import.meta.url));
+        const file = path.join(root, 'business.spec.cjs'),
+            book = path.join(root, 'business.xlsx');
+        await fs.writeFile(
+            file,
+            attachRecordedCases(renderRecordingSpec(initial), generateRecordedCases(initial)),
+        );
+        await exportRecording(file, book, python);
+        const env = {
+            ...process.env,
+            LAYA_HOME: root,
+            PYTHONPATH: path.join(project, 'tests/fixtures/local-model'),
+        };
+        const args = [
+            path.join(project, 'bin/laya.mjs'),
+            'replay',
+            book,
+            '--url',
+            a,
+            '--headless',
+            '--provider',
+            'local',
+            '--lazy-model',
+            '--python',
+            python,
+            '--delay',
+            '0',
+        ];
+        await exec(process.execPath, [...args, '--out', path.join(root, 'run')], {
+            cwd: root,
+            env,
+        });
+        const report = JSON.parse(await fs.readFile(path.join(root, 'run/results.json'), 'utf8'));
+        assert.deepEqual(
+            report.results.map((r) => [r.id, r.status]),
+            [
+                ['REC-001', '不适用'],
+                ['REC-002', '通过'],
+            ],
+        );
+        await login(a, 'second-user', { authReset: true });
+        await assert.rejects(findRecordingAuth(root, a), /多个账号/);
+        assert.ok(await findRecordingAuth(root, a, 'second-user'));
+        expire = true;
+        await assert.rejects(
+            exec(process.execPath, [...args, '--out', path.join(root, 'expired')], {
+                cwd: root,
+                env,
+            }),
+            (error) => error.code === 1 && /失效/.test(error.stderr),
+        );
     },
 );

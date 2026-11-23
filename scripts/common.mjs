@@ -78,10 +78,11 @@ export async function resolveSkillSettings(args, provider = option(args, '--prov
               }
             : { model: safeText(settings.model, 1000) }),
         url: settings.url ? safeUrl(settings.url) : '',
-        authState: settings.authState ? safeText(path.resolve(settings.authState), 1000) : null,
-        authStateExists: Boolean(
-            settings.authState && fs.existsSync(path.resolve(settings.authState)),
-        ),
+        authStateMode: settings.authState ? 'explicit' : 'per-site',
+        ...(settings.authState && {
+            authState: safeText(path.resolve(settings.authState), 1000),
+            authStateExists: fs.existsSync(path.resolve(settings.authState)),
+        }),
         sources,
     };
     return { settings, summary };

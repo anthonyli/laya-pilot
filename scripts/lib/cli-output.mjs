@@ -70,6 +70,7 @@ export function printRunHelp(version) {
                     '--out DIR               Save results to a new directory',
                     '--provider local        Use the installed local model',
                     '--manual-login         Sign in in a visible browser',
+                    '--ui-adapter FILE      Load project UI selectors for Excel replay',
                     '--allow-write          Allow authorized write operations',
                 ],
             ],

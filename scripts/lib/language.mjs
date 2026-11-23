@@ -1,4 +1,5 @@
 import { HEALTH_EXPECTATIONS, OPTIONAL_API_EXPECTATION } from './diagnostics.mjs';
+import { createExpectation } from './recorded-create.mjs';
 
 // General instruction grammar only. No case IDs, module names, routes or CSS selectors.
 export class Halt extends Error {
@@ -7,6 +8,20 @@ export class Halt extends Error {
         this.category = category;
     }
 }
+export const recordedReviewPrefix = '待补录：';
+
+export function isAreaSwitch(target) {
+    return (
+        target?.role === 'tab' ||
+        (['button', 'link', 'menuitem'].includes(target?.role) &&
+            !target.row &&
+            !target.rowKey &&
+            !target.rowAmbiguous &&
+            !target.scope &&
+            /^(?:Edit|Run)\s+Area$/i.test(target.name))
+    );
+}
+
 export const norm = (s) =>
     String(s || '')
         .toLowerCase()
@@ -48,14 +63,67 @@ export function parseData(s) {
 export function describe(step) {
     const q = quoted(step);
     let m;
+    if (
+        (m = step.match(
+            /^(在弹窗中)?点击「(save|submit|保存|提交|保存并关闭)」按钮并验证新增记录$/i,
+        ))
+    )
+        return {
+            verb: 'click',
+            target: m[2],
+            verifyCreate: true,
+            ...(m[1] && { scope: 'dialog' }),
+        };
     if ((m = step.match(/^在「([^」]+)」列中定位值为「([^」]+)」的唯一记录$/)))
         return { verb: 'bindExactRecord', column: m[1], value: m[2] };
+    if ((m = step.match(/^展开导航图标「([^」]+)」以显示「([^」]+)」链接$/)))
+        return { verb: 'click', target: m[1], recordedRole: 'navIcon', childLink: m[2] };
+    if ((m = step.match(/^展开「([^」]+)」导航菜单$/)))
+        return { verb: 'click', target: m[1], recordedRole: 'namedNavIcon' };
+    if ((m = step.match(/^(在弹窗中)?点击操作图标「([^」]+)」$/)))
+        return {
+            verb: 'click',
+            target: m[2],
+            recordedRole: 'namedIcon',
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if ((m = step.match(/^点击「([^」]+)」链接$/)))
+        return { verb: 'click', target: m[1], recordedRole: 'link' };
+    if ((m = step.match(/^点击「([^」]+)」选项$/)))
+        return { verb: 'click', target: m[1], recordedRole: 'option' };
+    if ((m = step.match(/^(在弹窗中)?点击「([^」]+)」字段的下拉框$/)))
+        return {
+            verb: 'click',
+            target: m[2],
+            recordedRole: 'fieldSelect',
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if ((m = step.match(/^在(弹窗的)?「([^」]+)」字段下拉框中点击「([^」]+)」选项$/)))
+        return {
+            verb: 'click',
+            target: m[3],
+            recordedRole: 'fieldOption',
+            field: m[2],
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if ((m = step.match(/^切换到「([^」]+)」区域$/)))
+        return { verb: 'click', target: m[1], recordedRole: 'area' };
     if ((m = step.match(/^在弹窗中点击「([^」]+)」按钮$/)))
         return { verb: 'click', target: m[1], scope: 'dialog' };
+    if ((m = step.match(/^在弹窗中点击标题为「([^」]+)」的卡片$/)))
+        return { verb: 'click', target: m[1], scope: 'dialog', recordedRole: 'cardTitle' };
     if ((m = step.match(/^在弹窗的「([^」]+)」输入框中输入「([^」]*)」$/)))
         return { verb: 'fill', target: m[1], value: m[2], scope: 'dialog' };
     if ((m = step.match(/^清空弹窗的「([^」]+)」输入框$/)))
         return { verb: 'clear', target: m[1], scope: 'dialog' };
+    if ((m = step.match(/^在(弹窗的)?「([^」]+)」字段中输入数值「([^」]*)」$/)))
+        return {
+            verb: 'fill',
+            target: m[2],
+            value: m[3],
+            locator: 'formNumber',
+            ...(m[1] && { scope: 'dialog' }),
+        };
     if (/^(?:打开网址|访问网址|navigate to|open url)\s*/i.test(step)) {
         const target = step.match(/https?:\/\/\S+/)?.[0];
         return { verb: 'navigate', target: target?.replace(/[”」"]$/, '') };
@@ -219,6 +287,7 @@ export function actionCriteria(spec) {
     );
 }
 export function expectation(text) {
+    if (text === createExpectation) return { kind: 'recorded-create' };
     const health = Object.entries(HEALTH_EXPECTATIONS).find(([, phrase]) => phrase === text);
     if (health) return { kind: 'health', category: health[0] };
     if (text === OPTIONAL_API_EXPECTATION) return { kind: 'health', category: 'api' };

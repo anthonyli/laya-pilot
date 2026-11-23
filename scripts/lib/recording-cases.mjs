@@ -1,4 +1,6 @@
+import { isAreaSwitch, recordedReviewPrefix } from './language.mjs';
 import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
+import { createExpectation } from './recorded-create.mjs';
 
 const pendingExpectation = '业务结果待补充（录制时未设置预期）';
 const optionalApiExpectation = '未观察到接口请求失败';
@@ -11,6 +13,7 @@ const actionRoles = {
     checkbox: '复选框',
     combobox: '下拉框',
     menuitem: '菜单项',
+    option: '选项',
 };
 const unattendedKeys = new Set(['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp']);
 const writeControl =
@@ -104,12 +107,27 @@ function actionStep(action, row, values, replacements) {
         const expected = manualExpectation(action, replacements);
         return expected ? [`检查步骤预期：${expected}`] : null;
     }
-    if (action.kind === 'press')
-        return unattendedKeys.has(action.key) ? [`按下 ${action.key}`] : null;
+    if (action.kind === 'press') {
+        if (!unattendedKeys.has(action.key)) return null;
+        if (!action.target) return [`按下 ${action.key}`];
+        if (
+            !workbookText(name) ||
+            action.target.rowAmbiguous ||
+            action.target.row ||
+            action.target.scope
+        )
+            return null;
+        const label =
+            { label: '标签', placeholder: '占位符', text: '文本' }[action.target.locator] ??
+            `角色 ${role} 名称`;
+        return [`按下 ${action.key}（${label}精确匹配「${name}」）`];
+    }
     if (!workbookText(name) || action.target.rowAmbiguous) return null;
     if (action.kind === 'fill' && workbookText(action.value, true)) {
         const value = typeof values?.get(action) === 'string' ? values.get(action) : action.value;
         const scope = action.target.scope === '弹窗' ? '弹窗的' : '';
+        if (action.target.locator === 'formNumber')
+            return [`在${scope}「${name}」字段中输入数值「${value}」`];
         return [
             value
                 ? `在${scope}「${name}」输入框中输入「${value}」`
@@ -121,6 +139,13 @@ function actionStep(action, row, values, replacements) {
     if (action.kind === 'check' || action.kind === 'uncheck')
         return [`${action.kind === 'check' ? '勾选' : '取消勾选'}「${name}」复选框`];
     if (action.kind !== 'click') return null;
+    if (action.target.locator === 'cardTitle') return [`在弹窗中点击标题为「${name}」的卡片`];
+    if (action.target.locator === 'namedNavIcon') return [`展开「${name}」导航菜单`];
+    if (action.target.locator === 'navIcon')
+        return workbookText(action.target.childLink)
+            ? [`展开导航图标「${name}」以显示「${action.target.childLink}」链接`]
+            : null;
+    if (isAreaSwitch(action.target)) return [`切换到「${name}」区域`];
     const steps = [];
     if (action.target.row) {
         const header = action.target.rowHeader ?? list(action.before)?.header;
@@ -130,7 +155,20 @@ function actionStep(action, row, values, replacements) {
         const key = matchesFixture ? row.fixture : action.target.row;
         steps.push(`在「${header}」列中定位值为「${key}」的唯一记录`);
     }
+    if (action.target.locator === 'fieldSelect') {
+        const scope = action.target.scope === '弹窗' ? '在弹窗中' : '';
+        return [...steps, `${scope}点击「${name}」字段的下拉框`];
+    }
+    if (
+        action.target.locator === 'selectOption' &&
+        workbookText(action.target.field?.name) &&
+        !action.target.field.row
+    ) {
+        const scope = action.target.field.scope === '弹窗' ? '在弹窗的' : '在';
+        return [...steps, `${scope}「${action.target.field.name}」字段下拉框中点击「${name}」选项`];
+    }
     const scope = action.target.scope === '弹窗' && role === 'button' ? '在弹窗中' : '';
+    if (action.target.locator === 'namedIcon') return [...steps, `${scope}点击操作图标「${name}」`];
     return [...steps, `${scope}点击「${name}」${actionRoles[role] ?? ''}`];
 }
 
@@ -338,17 +376,6 @@ function caseHealth(actions) {
     ];
 }
 
-function retainedActions(actions) {
-    return actions.slice(0, 24).map(({ kind, target, url, value, key, reason }) => ({
-        kind,
-        ...(target && { target: target.name, ...(target.row && { row: target.row }) }),
-        ...(kind === 'goto' && workbookUrl(url) && { url }),
-        ...(workbookText(value, true) && { value }),
-        ...(key && { key }),
-        ...(reason && { reason }),
-    }));
-}
-
 function searchTrigger(action) {
     return (
         (action?.kind === 'click' && searchControl.test(action.target?.name ?? '')) ||
@@ -368,12 +395,180 @@ const titles = {
 };
 const mutationKinds = new Set(['create', 'edit', 'delete']);
 
-/** Convert bounded, observed workflow outcomes into independently replayable Excel cases. */
-export function generateRecordedCases(recording) {
+function possibleWrite(action) {
+    return (
+        action.kind === 'click' &&
+        !isAreaSwitch(action.target) &&
+        writeControl.test(action.target?.name ?? '')
+    );
+}
+
+function orderedSteps(actions) {
+    return actions.flatMap((action) => {
+        const steps = actionStep(action);
+        if (steps) return steps;
+        const target = workbookText(action.target?.name) ? `「${action.target.name}」` : '';
+        return [recordedReviewPrefix + (action.reason || `${target}操作缺少可回放的目标或参数。`)];
+    });
+}
+
+const sceneNames = {
+    login: '登录',
+    navigate: '区域切换',
+    create: '新增配置',
+    edit: '编辑记录',
+    delete: '删除记录',
+    search: '查询',
+    custom: '录制流程',
+};
+
+function sceneTrigger(step) {
+    if (step.startsWith('展开导航图标「') || /^展开「.+」导航菜单$/.test(step)) return 'navigate';
+    if (/^切换到「.+」区域$|^点击「.+」(?:链接|标签页|菜单项)$/.test(step)) return 'navigate';
+    const button =
+        step.match(/^(?:在弹窗中)?点击「(.+)」按钮$/)?.[1] ||
+        step.match(/^(?:在弹窗中)?点击操作图标「(.+)」$/)?.[1];
+    if (!button) return null;
+    if (/^(?:登\s*录|login|log in|sign in)$/i.test(button)) return 'login';
+    if (searchControl.test(button)) return 'search';
+    return writeKind(button);
+}
+
+// Both freshly captured events and the previous ordered workbook use this step grammar.
+// Each line belongs to exactly one scene, including unrecognized actions and checkpoints.
+function groupRecordedSteps(entries) {
+    const groups = [];
+    let current;
+    let closed = false;
+    for (const [index, entry] of entries.entries()) {
+        const trigger =
+            sceneTrigger(entry.step) ||
+            (entry.step.startsWith('在「') && entry.step.includes('列中定位值为')
+                ? sceneTrigger(entries[index + 1]?.step || '')
+                : null);
+        if (
+            !current ||
+            (trigger &&
+                ((current.kind &&
+                    current.kind !== trigger &&
+                    !(trigger === 'navigate' && mutationKinds.has(current.kind) && !closed)) ||
+                    (closed && mutationKinds.has(trigger))))
+        ) {
+            current = { kind: trigger, entries: [] };
+            groups.push(current);
+            closed = false;
+        }
+        current.kind ||= trigger;
+        current.entries.push(entry);
+        const button = entry.step.match(/^(?:在弹窗中)?点击「(.+)」按钮$/)?.[1];
+        if (button && (closeControl.test(button) || commitControl.test(button))) closed = true;
+    }
+    return groups;
+}
+
+function createSaveEntries(group) {
+    const saves = new Set();
+    if (group.kind !== 'create') return saves;
+    let creating = !group.entries.some((entry) => sceneTrigger(entry.step) === 'create');
+    for (const entry of group.entries) {
+        const trigger = sceneTrigger(entry.step);
+        if (trigger === 'create') creating = true;
+        if (trigger === 'edit' || trigger === 'delete') creating = false;
+        const name = entry.step.match(/^(?:在弹窗中)?点击「([^」]+)」按钮$/)?.[1];
+        if (name && closeControl.test(name)) creating = false;
+        if (creating && /^(?:save|submit|保存|提交|保存并关闭)$/i.test(name || ''))
+            saves.add(entry);
+    }
+    return saves;
+}
+
+export function addCreateVerification(steps) {
+    const entries = steps.map((step) => ({ step }));
+    const saves = createSaveEntries({ kind: 'create', entries });
+    return entries.map((entry) => entry.step + (saves.has(entry) ? '并验证新增记录' : ''));
+}
+
+export function recordedCreateActions(actions) {
+    const entries = actions.flatMap((action) =>
+        orderedSteps([action]).map((step) => ({ step, action })),
+    );
+    return new Set(
+        groupRecordedSteps(entries).flatMap((group) =>
+            [...createSaveEntries(group)].map((entry) => entry.action),
+        ),
+    );
+}
+
+export function recordedScenarios(url, entries, notices = [], authenticatedAccount) {
+    const groups = groupRecordedSteps(entries);
+    const login = groups.find((group) => group.kind === 'login');
+    const account = login?.entries
+        .map(({ step }) => step.match(/^在「([^」]+)」输入框中输入「([^」]+)」$/))
+        .find((match) => match && /account|user|email|账号|账户|用户名|邮箱/i.test(match[1]))?.[2];
+    const skipped = [...notices];
+    const cases = groups.map(({ kind, entries }, i) => {
+        const id = `REC-${String(i + 1).padStart(3, '0')}`;
+        const actions = entries.map((e) => e.action).filter(Boolean);
+        const saves = createSaveEntries({ kind, entries });
+        const steps = entries.map((entry, j) => {
+            const step = entry.step + (saves.has(entry) ? '并验证新增记录' : '');
+            if (step.startsWith(recordedReviewPrefix)) skipped.push(`${id} 第 ${j + 1} 步 ${step}`);
+            return `${j + 1}. ${step}`;
+        });
+        const write =
+            actions.some(possibleWrite) ||
+            entries.some(({ step }) => {
+                const button = step.match(/^(?:在弹窗中)?点击「(.+)」按钮$/)?.[1];
+                return button && writeControl.test(button);
+            });
+        const scene = {
+            kind: kind || 'custom',
+            previous: i ? `REC-${String(i).padStart(3, '0')}` : '',
+        };
+        if (authenticatedAccount || account) scene.account = authenticatedAccount || account;
+        const entryUrl = workbookUrl(actions[0]?.before?.url, new URL(url).origin);
+        if (entryUrl) scene.url = entryUrl;
+        return {
+            id,
+            title: sceneNames[scene.kind],
+            preconditions: write ? writePrecondition : '',
+            data: JSON.stringify({ recordedScene: scene }),
+            steps: steps.join('\n'),
+            expected: [
+                ...caseHealth(actions),
+                ...(saves.size ? [createExpectation] : []),
+                ...(entries.some(({ step }) => step.startsWith('检查步骤预期：'))
+                    ? ['录制设置的步骤预期全部满足']
+                    : saves.size
+                      ? []
+                      : [pendingExpectation]),
+            ].join('\n'),
+        };
+    });
+    return {
+        url,
+        cases,
+        skipped,
+        requiresWrite: cases.some((c) => c.preconditions === writePrecondition),
+    };
+}
+
+/** Record the actual sequence unless independent regression cases were requested. */
+export function generateRecordedCases(recording, { splitCases = false } = {}) {
     const initial = workbookUrl(
         recording.url ?? recording.actions.find((a) => a.kind === 'goto')?.url,
     );
     if (!initial) throw Error('录制缺少可回放的页面入口。');
+    if (!splitCases) {
+        const actions = recording.actions;
+        if (!actions.some((action) => action.kind !== 'goto'))
+            throw Error('录制中没有可转换的用户操作。');
+        const entries = actions.flatMap((action) =>
+            orderedSteps([action]).map((step) => ({ action, step })),
+        );
+        if (actions[0]?.kind !== 'goto') entries.unshift({ step: `打开网址 ${initial}` });
+        return recordedScenarios(initial, entries, recording.skipped, recording.account);
+    }
     const origin = new URL(initial).origin;
     const cases = [];
     const skipped = [...(recording.skipped ?? [])];
@@ -389,13 +584,11 @@ export function generateRecordedCases(recording) {
         const id = nextId();
         // Do not replay unverified writes, including ordinal-only row actions.
         // Retain what the user recorded in a visible cell for review.
-        const possibleWrite = actions.some(
-            (action) => action.kind === 'click' && writeControl.test(action.target?.name ?? ''),
-        );
+
         const warnings =
             issue ||
             (!steps ? '部分录制动作缺少可回放的控件定位。' : '') ||
-            (!mutationKinds.has(kind) && possibleWrite
+            (!mutationKinds.has(kind) && actions.some(possibleWrite)
                 ? '操作可能改变数据，尚缺少对应的业务结果证据。'
                 : '');
         const health = caseHealth(steps && !warnings ? actions : []);
@@ -403,7 +596,6 @@ export function generateRecordedCases(recording) {
             ? {
                   录制诊断: warnings,
                   录制动作总数: actions.length,
-                  录制动作: retainedActions(actions),
               }
             : {};
         const named = [...actions].reverse().find((action) => action.after?.headings?.length)?.after
@@ -420,7 +612,10 @@ export function generateRecordedCases(recording) {
             title,
             preconditions: !warnings && mutationKinds.has(kind) ? writePrecondition : '',
             data: Object.keys(data).length ? JSON.stringify(data, null, 2) : '',
-            steps: [...entry, ...(warnings ? [] : steps)]
+            steps: [
+                ...entry,
+                ...(warnings ? [recordedReviewPrefix + warnings, ...orderedSteps(actions)] : steps),
+            ]
                 .map((step, index) => `${index + 1}. ${step}`)
                 .join('\n'),
             expected: [...new Set(expected)].join('\n'),
@@ -520,7 +715,7 @@ export function generateRecordedCases(recording) {
             continue;
         }
         segment.push(action);
-        const kind = action.kind === 'click' && writeKind(name);
+        const kind = action.kind === 'click' && !isAreaSwitch(action.target) && writeKind(name);
         if (kind && !intent) intent = { kind, opener: action, at: segment.length - 1 };
         if (intent) {
             const terminal =
@@ -611,11 +806,7 @@ export function generateRecordedCases(recording) {
         const checked = segment.some(
             (action) => action.kind === 'assert' && manualExpectation(action),
         );
-        const mayWrite =
-            intent ||
-            segment.some(
-                (action) => action.kind === 'click' && writeControl.test(action.target?.name ?? ''),
-            );
+        const mayWrite = intent || segment.some(possibleWrite);
         const issue = mayWrite
             ? '未能验证写操作的结果或目标记录，请补充独立测试数据和业务预期。'
             : !checked

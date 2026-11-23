@@ -135,7 +135,15 @@ def _read_sheets(wb, cases, warnings, merges):
                     anchor['row'],
                 )
             )
-            if linked and blank_identity:
+            repeated_id = (
+                linked
+                and get('id') == anchor['id']
+                and not get('title')
+                and _merged_with_case(
+                    merges.get(sheet.title, ()), rowno, (mapping.get('title'),), anchor['row']
+                )
+            )
+            if linked and (blank_identity or repeated_id):
                 for key in ('steps', 'expected', 'preconditions', 'data', 'import_error'):
                     if item[key]:
                         cases[-1][key] += ('\n' if cases[-1][key] else '') + item[key]

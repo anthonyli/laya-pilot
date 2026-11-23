@@ -1,3 +1,4 @@
+import { loadUiAdapter, validateUiAdapterSelectors } from './lib/ui-adapters.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,7 @@ import {
     safeText,
     safeUrl,
 } from './lib/diagnostics.mjs';
+import { authRoute, findRecordingAuth, rememberRecordingAuth } from './lib/recording-auth.mjs';
 import { openBrowser } from './lib/browser-provider.mjs';
 import {
     loadLocalEnvironment,
@@ -46,6 +48,7 @@ const fileConfig = await loadProjectConfig(arg('--config', ''));
 const option = (cli, env, key, fallback) => configured(arg, cli, env, fileConfig[key], fallback);
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const config = {
+    credentialRoot: dataRoot,
     url: option('--url', 'TEST_URL', 'url', ''),
     excel: option('--excel', 'TEST_EXCEL', 'excel', ''),
     user: option('--user', 'TEST_USER', 'user', ''),
@@ -100,6 +103,8 @@ const config = {
         ),
     ),
 };
+config.preferPassword = Boolean(config.user && process.env.TEST_PASSWORD);
+
 async function secret(label = '登录密码', envName = 'TEST_PASSWORD') {
     if (process.env[envName]) return registerSecret(process.env[envName]);
     if (!process.stdin.isTTY) throw Error('需要交互终端输入' + label + '，或设置' + envName);
@@ -292,6 +297,7 @@ async function main() {
         throw Error('--auth-state 需要 --auth-check 指定登录成功后的唯一页面标记');
     if ((config.authReset || config.authSessionStorage) && !config.authState)
         throw Error('--auth-reset / --auth-session-storage 需要 --auth-state');
+    config.uiAdapters = await loadUiAdapter(arg('--ui-adapter', ''));
     if (arg('--control-bindings', ''))
         config.controlBindings = validateControlBindings(
             JSON.parse(await fs.readFile(arg('--control-bindings', ''), 'utf8')),
@@ -438,10 +444,37 @@ async function main() {
         config.language = selected.some((c) => /[\u4e00-\u9fff]/.test(c.steps)) ? 'zh-CN' : 'en';
     if (config.manualLogin && config.headless) throw Error('手动登录需要可见浏览器');
 
+    const sceneFor = (c) => {
+        try {
+            return JSON.parse(c.data || '{}').recordedScene;
+        } catch {
+            return null;
+        }
+    };
+    const accounts = new Set(selected.map((c) => sceneFor(c)?.account).filter(Boolean));
+    if (accounts.size > 1 || (accounts.size && config.user && !accounts.has(config.user)))
+        throw Error('本次用例的录制账号与所选账号不一致，请选择同一账号的用例。');
+    const recordedAccount = [...accounts][0];
+    config.authAccount ||= config.user || recordedAccount;
+    const requestedUrl = config.url;
+    const managed =
+        !config.authState &&
+        !config.authReset &&
+        (await findRecordingAuth(dataRoot, requestedUrl, config.user || recordedAccount));
+    if (managed) {
+        console.log('AUTH 已找到此站点和账号的登录态，正在验证：' + managed.authState);
+        config.authState = managed.authState;
+        config.authAccount = managed.account;
+        config.authCheck ||= managed.info.check;
+        config.authSessionStorage = true;
+        config.recordedLogin = managed.info;
+        config.url = managed.info.landingUrl;
+    }
     const modelWarmup = beginModelWarmup(laya, config);
     const { browser: opened, context, page, authRestored } = await openBrowser(config);
     browser = opened;
     activePage = page;
+    await validateUiAdapterSelectors(page, config.uiAdapters);
     const engine = new Engine(
         page,
         laya,
@@ -457,7 +490,21 @@ async function main() {
         authRestored,
     );
     config.authenticated = authStatus !== 'not-required';
-    await saveAuthState(context, page, config);
+    if (config.authState) await saveAuthState(context, page, config);
+    else if (authStatus === 'logged-in' && (config.authAccount || config.user)) {
+        const saved = await rememberRecordingAuth(
+            dataRoot,
+            context,
+            page,
+            { url: requestedUrl, account: config.authAccount || config.user },
+            config.authCheck,
+        );
+        console.log(saved ? 'AUTH 已保存此站点和账号的登录态。' : 'AUTH 未验证到可复用的登录态。');
+    }
+    if (config.recordedLogin && authRoute(requestedUrl) !== config.recordedLogin.loginUrl) {
+        config.url = requestedUrl;
+        await engine.navigate(config.url);
+    }
     await waitModelWarmup(modelWarmup);
     // Traces start per case, after login: never record login/password entry.
     const traces = new CaseTraces(context, config.out);
@@ -478,9 +525,50 @@ async function main() {
     }
     for (const [index, c] of selected.entries()) {
         console.log('RUN ' + c.id + ' ' + c.title);
-        await traces.begin();
-        const r = await engine.runCase(c);
-        await traces.end(r, r.evidence_dir);
+        const scene = sceneFor(c);
+        const previous = results.at(-1);
+        const followsPrevious = !!scene?.previous && previous?.id === scene.previous;
+        let r;
+        if (scene?.kind === 'login' && config.authenticated) {
+            r = {
+                ...c,
+                status: '不适用',
+                category: '已在回放前认证',
+                reason: '本轮已验证登录态，未重复执行录制的登录操作。',
+                actions: [],
+                assertions: [],
+                duration_ms: 0,
+                page_navigations: 0,
+            };
+        } else if (
+            followsPrevious &&
+            !previous.stepsCompleted &&
+            previous.category !== '已在回放前认证'
+        ) {
+            r = {
+                ...c,
+                status: '未执行',
+                category: '前序场景未完成',
+                reason: `尚未完成 ${previous.id}，无法从录制时的页面状态继续。`,
+                actions: [],
+                assertions: [],
+                duration_ms: 0,
+                page_navigations: 0,
+            };
+        } else {
+            await traces.begin();
+            const startUrl =
+                scene?.url &&
+                URL.canParse(scene.url) &&
+                new URL(scene.url).origin === new URL(config.url).origin
+                    ? scene.url
+                    : c.url;
+            r = await engine.runCase(
+                { ...c, url: startUrl },
+                { continueRecording: followsPrevious },
+            );
+            await traces.end(r, r.evidence_dir);
+        }
         results.push(r);
         console.log(r.status + ' ' + c.id + ' ' + r.reason.slice(0, 170));
         await report(results, laya, input.cases.length, input.warnings);

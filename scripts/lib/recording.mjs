@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { printPanel, resultLabel } from './cli-output.mjs';
-import { cmd } from './entry.mjs';
+import { cmd, dataRoot } from './entry.mjs';
+import { loadUiAdapter } from './ui-adapters.mjs';
 import {
     projectRunsDirectory,
     RUN_FILES,
@@ -49,19 +50,24 @@ function shellPath(file) {
     return shellArgument(relative && !relative.startsWith('..') ? relative : file);
 }
 
-/** Recorded lines left out of the Excel case, e.g. a stray CapsLock press. */
+/** Recording diagnostics, including unresolved steps and ignored legacy keys. */
 function skippedSection(testCase) {
-    return testCase.skipped?.length ? [['SKIPPED', testCase.skipped]] : [];
+    return testCase.skipped?.length ? [['REVIEW', testCase.skipped]] : [];
 }
 
-function excelReplaySection(excel, generated) {
+function excelReplaySection(excel, generated, adapterFile) {
     const write = generated.requiresWrite ? ' --allow-write' : '';
+    const longest = Math.max(
+        ...(generated.cases ?? [generated]).map((entry) => entry.steps.split('\n').length),
+    );
+    const limit = longest > 25 ? ` --max-steps ${longest}` : '';
+    const adapter = adapterFile ? ` --ui-adapter ${shellArgument(adapterFile)}` : '';
     return [
         'NEXT',
         [
             ...(write ? ['Replay writes in a test environment.'] : []),
             cmd(
-                `replay ${shellPath(excel)} --url ${shellArgument(safeUrl(generated.url))} --headless${write}`,
+                `replay ${shellPath(excel)} --url ${shellArgument(safeUrl(generated.url))} --headless${write}${limit}${adapter}`,
             ),
         ],
     ];
@@ -81,15 +87,21 @@ async function recordExcel(url, output, options, channel, storageState) {
     ]);
     const recording = await captureRecording({
         playwright: require('playwright'),
+        uiAdapters: await loadUiAdapter(options['ui-adapter']),
         url: url.href,
         channel,
         storageState,
+        authRoot: dataRoot,
+        user: options.user || process.env.TEST_USER,
+        authReset: options['auth-reset'],
+        authCheck: options['auth-check'] || process.env.TEST_AUTH_CHECK,
+        onAuth: (message) => console.log(message),
     });
     const spec = renderRecordingSpec(recording, options['browser-channel']);
     await fs.mkdir(path.dirname(output), { recursive: true });
     let generated;
     try {
-        generated = generateRecordedCases(recording);
+        generated = generateRecordedCases(recording, { splitCases: options['split-cases'] });
     } catch (error) {
         await fs.writeFile(output, spec, { flag: 'wx', mode: 0o600 });
         printPanel(
@@ -124,7 +136,7 @@ async function recordExcel(url, output, options, channel, storageState) {
         ['EXCEL', [excel, ...generated.cases.map((entry) => `${entry.id} ${entry.title}`)]],
         ...skippedSection(generated),
         ['PLAYWRIGHT SOURCE', [output]],
-        excelReplaySection(excel, generated),
+        excelReplaySection(excel, generated, options['ui-adapter']),
     ]);
     return 0;
 }
@@ -139,6 +151,8 @@ async function withTempDirectory(work) {
 }
 
 async function record(root, input, options) {
+    if (options['ui-adapter'] && options['code-only'])
+        throw Error('--ui-adapter 用于生成 Excel 和配套 Playwright 脚本的录制模式。');
     const invalidUrl = '录制需要一个不含账号密码的 HTTP(S) 地址';
     let url;
     try {
@@ -373,6 +387,11 @@ export async function runRecordingCommand(command, args) {
             ...(recording && {
                 'browser-channel': { type: 'string' },
                 'storage-state': { type: 'string' },
+                user: { type: 'string' },
+                'auth-reset': { type: 'boolean' },
+                'auth-check': { type: 'string' },
+                'ui-adapter': { type: 'string' },
+                'split-cases': { type: 'boolean' },
                 'code-only': { type: 'boolean' },
                 'excel-out': { type: 'string' },
             }),
@@ -390,6 +409,11 @@ export async function runRecordingCommand(command, args) {
               [
                   '--out FILE                Save to a new .spec.cjs file',
                   '--excel-out FILE          Choose the companion .xlsx output',
+                  '--user NAME               Choose a saved account on this site',
+                  '--auth-reset              Start without a saved login',
+                  '--auth-check SELECTOR     Verify a marker on the authenticated page',
+                  '--ui-adapter FILE         Load a project UI adapter (JSON)',
+                  '--split-cases             Generate independent cases from observed outcomes',
                   '--code-only               Save the Playwright file only',
                   '--browser-channel NAME   Use chrome, msedge or chromium',
                   '--storage-state FILE     Use a saved Playwright login',

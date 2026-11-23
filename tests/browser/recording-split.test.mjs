@@ -71,7 +71,7 @@ test(
                 await button('完成录制').click();
             },
         });
-        const generated = generateRecordedCases(recording);
+        const generated = generateRecordedCases(recording, { splitCases: true });
         const create = generated.cases.find((entry) => /新增/.test(entry.title));
         const edit = generated.cases.find((entry) => /编辑/.test(entry.title));
         const remove = generated.cases.find((entry) => /删除/.test(entry.title));

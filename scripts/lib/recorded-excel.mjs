@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { parse } from 'acorn';
 import { cmd, resolveSkillSettings, skillRoot } from '../common.mjs';
+import { recordedScenarios } from './recording-cases.mjs';
 import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
 
 const actionNames = { click: '点击', check: '勾选', uncheck: '取消勾选', hover: '悬停在' };
@@ -16,6 +17,7 @@ const recordedRoles = {
     checkbox: '复选框',
     combobox: '下拉框',
     menuitem: '菜单项',
+    option: '选项',
 };
 const locatorLabels = { getByLabel: '标签', getByPlaceholder: '占位符', getByText: '文本' };
 
@@ -293,6 +295,24 @@ export async function exportRecording(file, output, python) {
             throw Error(
                 'Playwright 脚本自录制后已修改，无法重新导出原录制断言。请编辑配套 Excel 或重新录制。',
             );
+        const [old] = generated.cases;
+        if (
+            generated.cases.length === 1 &&
+            old.id === 'REC-001' &&
+            old.title === '浏览器录制流程' &&
+            !old.data
+        ) {
+            const entries = old.steps
+                .split('\n')
+                .map((line) => ({ step: line.replace(/^\d+\.\s*/, '') }));
+            const scenes = recordedScenarios(
+                generated.url,
+                entries,
+                (generated.skipped ?? []).filter((item) => !/^REC-001 第 \d+ 步 /.test(item)),
+            );
+            await writeRecordedCases(scenes.cases, output, python);
+            return scenes;
+        }
         await writeRecordedCases(generated.cases, output, python);
         return generated;
     }

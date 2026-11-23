@@ -16,19 +16,29 @@ if [cell.value for cell in sheet[1]] != headers:
 for row in sheet.iter_rows(min_row=2):
     for cell in row:
         cell.value = None
-for row, case in enumerate(cases, 2):
-    for column, field in enumerate(fields, 1):
-        cell = sheet.cell(row, column)
-        value = case[field]
-        if len(value) > 32767:
-            raise ValueError(f'{case["id"]} 的录制内容超过单元格上限，请拆成多条用例')
-        cell.value = value
-        cell.data_type = 's'
-        if row > 2:
-            cell.alignment = copy(sheet.cell(2, column).alignment)
-    lines = max(case[field].count('\n') + 1 for field in fields)
-    sheet.row_dimensions[row].height = max(
-        sheet.row_dimensions[row].height or 0, min(409, 22 * lines)
-    )
+row = 2
+for case in cases:
+    # Merged identity cells let the existing importer reassemble one long case.
+    first = row
+    step_lines = case['steps'].split('\n')
+    for offset in range(0, len(step_lines), 12):
+        values = {field: case[field] if offset == 0 or field == 'id' else '' for field in fields}
+        values['steps'] = '\n'.join(step_lines[offset : offset + 12])
+        for column, field in enumerate(fields, 1):
+            cell = sheet.cell(row, column)
+            value = values[field]
+            if len(value) > 32767:
+                raise ValueError(f'{case["id"]} 的{headers[column - 1]}超过单元格上限')
+            cell.value = value
+            cell.data_type = 's'
+            if row > 2:
+                cell.alignment = copy(sheet.cell(2, column).alignment)
+        lines = max(value.count('\n') + 1 for value in values.values())
+        sheet.row_dimensions[row].height = max(
+            sheet.row_dimensions[row].height or 0, min(409, 22 * lines)
+        )
+        row += 1
+    if row - first > 1:
+        sheet.merge_cells(start_row=first, end_row=row - 1, start_column=2, end_column=2)
 with open(sys.argv[2], 'xb') as output:
     book.save(output)

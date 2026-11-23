@@ -7,6 +7,26 @@ export const HEALTH_EXPECTATIONS = {
 };
 export const OPTIONAL_API_EXPECTATION = '未观察到接口请求失败';
 
+export function businessResponseFailed(body) {
+    if (!body || typeof body !== 'object') return false;
+    if (
+        body.success === false ||
+        body.ok === false ||
+        body.error === true ||
+        /^(?:failed|failure|error|denied)$/i.test(body.status || '')
+    )
+        return true;
+    const code = body.errorCode ?? body.error_code ?? body.code;
+    if (code === undefined || code === null) return false;
+    if (/^[45](?:\d{2}|\d{5})$/.test(String(code))) return true;
+    return (
+        !/^(0+|200|success|ok)$/i.test(String(code)) &&
+        /失败|错误|校验不通过|failed|invalid|already exists|denied/i.test(
+            body.message || body.msg || '',
+        )
+    );
+}
+
 export function registerSecret(value) {
     if (typeof value === 'string' && value) secrets.add(value);
     return value;
@@ -95,7 +115,11 @@ export class BrowserDiagnostics {
                         new Promise((resolve) => setTimeout(() => resolve(''), 700)),
                     ])
                         .then((body) => {
-                            if (!body || body.length > 20000 || JSON.parse(body)?.success !== false)
+                            if (
+                                !body ||
+                                body.length > 20000 ||
+                                !businessResponseFailed(JSON.parse(body))
+                            )
                                 return;
                             this.add(
                                 {

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { describe, lines } from '../scripts/lib/language.mjs';
+import { stepDiagnostic } from '../scripts/lib/case-diagnostics.mjs';
+import { Engine } from '../scripts/lib/engine.mjs';
 import { generateRecordedCases } from '../scripts/lib/recording-cases.mjs';
+
+const splitCases = (recording) => generateRecordedCases(recording, { splitCases: true });
 
 const url = 'http://127.0.0.1:8765/orders';
 const headers = ['订单名', '状态'];
@@ -29,6 +34,17 @@ const event = (kind, name, before, after, options = {}) => ({
 });
 const click = (...args) => event('click', ...args);
 
+test('preserves the option role when a portaled dropdown choice becomes an Excel step', () => {
+    const name = '[Field] Login Account';
+    const snapshot = state([]);
+    const result = generateRecordedCases({
+        url,
+        actions: [click(name, snapshot, snapshot, { role: 'option' })],
+    });
+    const step = lines(result.cases[0].steps).at(-1);
+    assert.deepEqual(describe(step), { verb: 'click', target: name, recordedRole: 'option' });
+});
+
 test('an independently generated edit verifies the changed field of the same exact record', () => {
     const initial = state([['示例订单', '处理中']]);
     const add = state([['示例订单', '处理中']], ['新增订单']);
@@ -47,7 +63,7 @@ test('an independently generated edit verifies the changed field of the same exa
         ['示例订单', '处理中'],
         ['新订单', '已发货'],
     ]);
-    const result = generateRecordedCases({
+    const result = splitCases({
         url,
         actions: [
             click('新增订单', initial, add),
@@ -91,7 +107,7 @@ test('later edits and deletion recreate the same recorded changes on their own f
         event('fill', '订单名', snapshot, snapshot, { role: 'textbox', scope: '弹窗', value });
     const edit = (name, status) =>
         click('编辑', table(name, status), editing(name, status), { row: name });
-    const result = generateRecordedCases({
+    const result = splitCases({
         url,
         actions: [
             click('新增订单', state([]), addForm),
@@ -130,7 +146,7 @@ test('a deletion without recorded preparation is reviewable without replaying th
     const initial = state([['真实订单', '处理中']]);
     const confirm = state([['真实订单', '处理中']], ['删除订单']);
     const removed = state([]);
-    const result = generateRecordedCases({
+    const result = splitCases({
         url,
         actions: [
             click('删除', initial, confirm, { row: '真实订单' }),
@@ -140,9 +156,9 @@ test('a deletion without recorded preparation is reviewable without replaying th
     const [disabled] = result.cases;
     assert.equal(result.requiresWrite, false);
     assert.match(disabled.title, /删除$/);
-    assert.doesNotMatch(disabled.steps, /点击|真实订单/);
+    assert.match(disabled.steps, /待补录：.*\n.*真实订单[\s\S]*点击「删除」/);
     assert.match(disabled.expected, /业务结果待补充/);
-    assert.match(disabled.data, /真实订单/);
+
     assert.match(result.skipped[0], /补充测试数据/);
 });
 
@@ -156,15 +172,47 @@ test('a search against a non-key column uses captured results and correlated req
         event('select', '订单状态', initial, initial, { role: 'combobox', value: '待处理' }),
         click('查询', initial, filtered, { requests: [{ kind: 'xhr', ok: true }] }),
     ];
-    const [found] = generateRecordedCases({ url, actions }).cases;
+    const [found] = splitCases({ url, actions }).cases;
     assert.match(found.expected, /列表中「状态」列的全部记录值为「待处理」/);
     assert.match(found.expected, /接口请求成功/);
 
     const ambiguous = { ...filtered, tableCount: 2 };
-    const [review] = generateRecordedCases({
+    const [review] = splitCases({
         url,
         actions: [actions[0], click('查询', initial, ambiguous)],
     }).cases;
     assert.match(review.expected, /业务结果待补充/);
     assert.match(review.data, /无法确认本次查询/);
+});
+
+test('a long sequence keeps every repeated switch and the actions after a review marker', async () => {
+    const snapshot = state([]);
+    const actions = Array.from({ length: 98 }, (_, i) =>
+        click(i % 2 ? 'Run Area' : 'Edit Area', snapshot, snapshot),
+    );
+    actions.splice(30, 0, { kind: 'unsupported', reason: '缺少定位' });
+    const result = generateRecordedCases({ url, actions });
+    assert.equal(result.requiresWrite, false);
+    const steps = lines(result.cases[0].steps);
+    assert.deepEqual(steps, [
+        `打开网址 ${url}`,
+        ...actions.map((action) =>
+            action.target ? `切换到「${action.target.name}」区域` : '待补录：缺少定位',
+        ),
+    ]);
+    assert.equal(stepDiagnostic(steps[31]).code, 'unresolved-recorded-action');
+    const engine = new Engine({ on() {} }, null, { allowWrite: false });
+    await assert.rejects(engine.step(steps[31]), /缺少定位/);
+    engine.guard(actions[0].target, steps[1]);
+    assert.throws(
+        () => engine.guard({ ...actions[0].target, rowKey: 'existing' }, steps[1]),
+        /只读/,
+    );
+    assert.equal(
+        generateRecordedCases({
+            url,
+            actions: [click('Edit Area', snapshot, snapshot, { row: 'existing' })],
+        }).requiresWrite,
+        true,
+    );
 });

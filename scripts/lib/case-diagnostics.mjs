@@ -1,4 +1,11 @@
-import { describe, expectation, lines, parseData, quoted } from './language.mjs';
+import {
+    describe,
+    expectation,
+    lines,
+    parseData,
+    quoted,
+    recordedReviewPrefix,
+} from './language.mjs';
 import { expandStep } from './planner.mjs';
 
 export function assertionDiagnostic(text) {
@@ -43,6 +50,13 @@ export function compileExpectation(source) {
 }
 
 export function stepDiagnostic(text) {
+    if (text.startsWith(recordedReviewPrefix))
+        return {
+            code: 'unresolved-recorded-action',
+            status: 'needs-review',
+            message: text,
+            suggestion: '将此行替换为实际操作后再回放。',
+        };
     const spec = describe(text);
     const expanded = expandStep(text);
     if (

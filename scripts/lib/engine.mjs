@@ -1,6 +1,28 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { CaseDirectories, slug } from './run-layout.mjs';
+import { resolveUiAdapters } from './ui-adapters.mjs';
+import {
+    recordedFormItem,
+    recordedSelectOption,
+    recordedSelectTrigger,
+    selectSelectors,
+} from './recorded-select.mjs';
+import { addCreateVerification } from './recording-cases.mjs';
+import {
+    createExpectation,
+    readCreateState,
+    compareCreateStates,
+    verifyCreateClick,
+} from './recorded-create.mjs';
+import { findDialogCard } from './recorded-card.mjs';
+import {
+    navigationIconSelector,
+    navigationScope,
+    findNamedIcon,
+    iconOwner,
+    declaredIconName,
+} from './recorded-navigation.mjs';
 import {
     eventLabel,
     HEALTH_EXPECTATIONS,
@@ -9,7 +31,16 @@ import {
     safeText,
     safeUrl,
 } from './diagnostics.mjs';
-import { Halt, expectation, lines, variables, parseData, norm, quoted } from './language.mjs';
+import {
+    Halt,
+    isAreaSwitch,
+    expectation,
+    lines,
+    variables,
+    parseData,
+    norm,
+    quoted,
+} from './language.mjs';
 import { observe, target, settle, assertionTarget, discoverRowLabels } from './dom.mjs';
 import { waitForReady, readTables } from './readiness.mjs';
 import { configureControlBindings } from './control-bindings.mjs';
@@ -136,6 +167,8 @@ export class Engine {
         this.page = page;
         this.laya = laya;
         this.config = config;
+        this.ui = resolveUiAdapters(config.uiAdapters);
+        this.selectMarkup = selectSelectors(this.ui);
         this.diagnostics = diagnostics;
         configureControlBindings(page, config.controlBindings);
         this.events = [];
@@ -171,9 +204,14 @@ export class Engine {
             ...extras,
         });
     }
+    isWriteControl(control, step) {
+        if (control.role === 'tab') return false;
+        if (!this.exactRecord && isAreaSwitch(control) && step === `切换到「${control.name}」区域`)
+            return false;
+        return writeName.test(control.name);
+    }
     guard(control, step) {
-        if (control.role === 'tab') return;
-        if (!writeName.test(control.name)) return;
+        if (!this.isWriteControl(control, step)) return;
         if (!this.config.allowWrite)
             throw new Halt(
                 '写入未启用',
@@ -183,19 +221,16 @@ export class Engine {
             throw new Halt('动作与用例不符', '模型选择写入操作，但原始步骤没有对应写入意图。');
     }
     async exactDialog() {
-        const dialog = this.page
-            .getByRole('dialog')
-            .or(this.page.getByRole('alertdialog'))
-            .filter({ visible: true });
+        const dialog = this.page.locator(this.ui.dialog).filter({ visible: true });
         if ((await dialog.count()) !== 1)
             throw new Halt('弹窗操作范围不明确', '当前页面没有唯一可见的目标弹窗');
         return dialog;
     }
-    async directClick(name, step, ordinal, scope) {
+    async directClick(name, step, ordinal, scope, recordedRole, field) {
         let found;
-        if (scope === 'dialog' || this.exactRecord) {
-            let container;
-            let location;
+        if (scope === 'dialog' || this.exactRecord || recordedRole) {
+            let container = this.page;
+            let location = '页面';
             if (this.exactRecord) {
                 if (ordinal || scope === 'dialog')
                     throw new Halt('记录操作范围不明确', '按列定位后的第一步须在该记录中执行');
@@ -203,30 +238,104 @@ export class Engine {
                 if (!row) throw new Halt('无法唯一定位记录', reason);
                 container = row;
                 location = '目标记录';
-            } else {
+            } else if (scope === 'dialog') {
                 container = await this.exactDialog();
                 location = '目标弹窗';
+            } else if (this.rowKey && (await this.targetRow(name))) {
+                const escaped = await this.page.evaluate((key) => CSS.escape(key), this.rowKey);
+                container = this.page.locator(`[data-row-key=${escaped}]`);
+                location = '目标记录';
             }
-            const actual = this.config.labels?.[name] || name;
+            const actual = recordedRole === 'navIcon' ? name : this.config.labels?.[name] || name;
             const options = { name: actual, exact: true };
-            const locator = container
-                .getByRole('button', options)
-                .or(container.getByRole('link', options))
-                .or(container.getByRole('menuitem', options))
-                .filter({ visible: true });
-            if ((await locator.count()) !== 1)
+            let roles = ['button', 'link', 'menuitem'];
+            if (recordedRole === 'link' || recordedRole === 'option') roles = [recordedRole];
+            if (recordedRole === 'area')
+                roles = isAreaSwitch({ role: 'button', name: actual })
+                    ? ['tab', ...roles]
+                    : ['tab'];
+            const timeout = this.config.assertTimeout || 4000;
+            let locator;
+            try {
+                if (recordedRole === 'fieldSelect' || recordedRole === 'fieldOption') {
+                    const fieldName = field ? this.config.labels?.[field] || field : actual;
+                    const opener = recordedSelectTrigger(
+                        container,
+                        this.page,
+                        fieldName,
+                        this.selectMarkup,
+                    );
+                    await opener.waitFor({ state: 'visible', timeout });
+                    locator =
+                        recordedRole === 'fieldSelect'
+                            ? opener
+                            : await recordedSelectOption(
+                                  this.page,
+                                  actual,
+                                  opener,
+                                  this.selectMarkup,
+                                  container,
+                                  timeout,
+                              );
+                    await locator.waitFor({ state: 'visible', timeout });
+                } else if (recordedRole === 'option') {
+                    locator = await recordedSelectOption(
+                        this.page,
+                        actual,
+                        null,
+                        this.selectMarkup,
+                        container,
+                    );
+                    await locator.waitFor({ state: 'visible', timeout });
+                } else if (recordedRole === 'cardTitle') {
+                    locator = await findDialogCard(container, actual, this.ui.cardTitle);
+                } else if (['namedNavIcon', 'namedIcon'].includes(recordedRole)) {
+                    if (recordedRole === 'namedNavIcon')
+                        container = container.locator(navigationScope);
+                    locator = await findNamedIcon(
+                        this.page,
+                        container,
+                        actual,
+                        iconOwner,
+                        declaredIconName,
+                        timeout,
+                    );
+                } else {
+                    locator = (
+                        recordedRole === 'navIcon'
+                            ? container.locator(navigationIconSelector(name))
+                            : roles
+                                  .map((role) => container.getByRole(role, options))
+                                  .reduce((a, b) => a.or(b))
+                    ).filter({ visible: true });
+                    await locator.waitFor({ state: 'visible', timeout });
+                }
+            } catch {
                 throw new Halt(
-                    (this.exactRecord ? '记录' : '弹窗') + '操作范围不明确',
+                    (this.exactRecord ? '记录' : scope === 'dialog' ? '弹窗' : '页面') +
+                        '操作范围不明确',
                     `${location}内无法唯一定位「${name}」`,
                 );
+            }
             found = {
                 locator,
                 control: {
                     name: actual,
-                    role: 'button',
-                    href: await locator.getAttribute('href', {
-                        timeout: this.config.assertTimeout || 4000,
-                    }),
+                    role: ['navIcon', 'namedNavIcon'].includes(recordedRole)
+                        ? 'navigation'
+                        : await locator.evaluate(
+                              (el, role) =>
+                                  el.getAttribute('role') ||
+                                  (role === 'fieldSelect'
+                                      ? 'combobox'
+                                      : role === 'fieldOption' || role === 'option'
+                                        ? 'option'
+                                        : el.tagName === 'A'
+                                          ? 'link'
+                                          : 'button'),
+                              recordedRole,
+                          ),
+                    href: await locator.getAttribute('href', { timeout }),
                 },
             };
         } else {
@@ -235,11 +344,7 @@ export class Engine {
             found = await this.chooseTarget(name, 'click', { rowKey, ordinal });
         }
         this.guard(found.control, step);
-        if (
-            this.pendingPreconditions?.length &&
-            writeName.test(found.control.name) &&
-            found.control.role !== 'tab'
-        )
+        if (this.pendingPreconditions?.length && this.isWriteControl(found.control, step))
             throw new Halt(
                 '前置条件未验证',
                 '业务写入前仍有未证明的前提：' + this.pendingPreconditions.join('；'),
@@ -559,6 +664,8 @@ export class Engine {
     }
     async step(text) {
         const diagnosis = stepDiagnostic(text);
+        if (diagnosis.status === 'needs-review')
+            throw new Halt('录制步骤待补录', diagnosis.message + '；' + diagnosis.suggestion);
         if (diagnosis.status === 'needs-data')
             throw new Halt('缺少测试数据', diagnosis.message + '；' + diagnosis.suggestion);
         const snap = await observe(this.page);
@@ -706,7 +813,44 @@ export class Engine {
             await settle(this.page, this.config.delay);
         } else if (verb === 'click') {
             if (!this.rowKey && /列表(?:中)?点击/.test(text)) await this.bindRow(text);
-            control = await this.directClick(spec.target, text, spec.ordinal, spec.scope);
+            const click = () =>
+                this.directClick(
+                    spec.target,
+                    text,
+                    spec.ordinal,
+                    spec.scope,
+                    spec.recordedRole,
+                    spec.field,
+                );
+            if (spec.verifyCreate) {
+                const result = await verifyCreateClick(
+                    this.page,
+                    async () => {
+                        control = await click();
+                    },
+                    readCreateState,
+                    compareCreateStates,
+                    this.ui,
+                    this.config.assertTimeout || 5000,
+                );
+                this.events.push({
+                    phase: this.phase,
+                    text,
+                    action: 'verify-create',
+                    control,
+                    ...result,
+                });
+                if (result.status !== '通过') {
+                    const error = new Halt('新增保存验证', result.reason);
+                    error.createResult = result;
+                    throw error;
+                }
+            } else control = await click();
+            if (spec.recordedRole === 'navIcon') {
+                await this.page
+                    .getByRole('link', { name: spec.childLink, exact: true })
+                    .waitFor({ state: 'visible', timeout: this.config.assertTimeout || 4000 });
+            }
         } else {
             if (['fill', 'clear', 'select', 'check', 'uncheck'].includes(verb)) {
                 const snap = await observe(this.page),
@@ -716,7 +860,19 @@ export class Engine {
                 this.dirtyAreas.set(JSON.stringify(area), area);
             }
             let found;
-            if (spec.scope === 'dialog') {
+            if (spec.locator === 'formNumber') {
+                const container = spec.scope === 'dialog' ? await this.exactDialog() : this.page;
+                const item = recordedFormItem(container, this.page, spec.target, this.selectMarkup);
+                const locator = item
+                    .locator('input[type=number],input[role=spinbutton]')
+                    .filter({ visible: true });
+                if ((await item.count()) !== 1 || (await locator.count()) !== 1)
+                    throw new Halt(
+                        '字段操作范围不明确',
+                        `无法唯一定位「${spec.target}」字段的数值输入框`,
+                    );
+                found = { locator, control: { name: spec.target, role: 'spinbutton' } };
+            } else if (spec.scope === 'dialog') {
                 const dialog = await this.exactDialog();
                 const name = this.config.labels?.[spec.target] || spec.target;
                 const options = { name, exact: true };
@@ -771,6 +927,16 @@ export class Engine {
         return event;
     }
     async verify(text) {
+        if (text === createExpectation) {
+            const results = this.events.filter((e) => e.action === 'verify-create');
+            const result = results.find((e) => e.status !== '通过') || results.at(-1);
+            return {
+                text,
+                kind: 'recorded-create',
+                status: result?.status || '未验证',
+                reason: result?.reason || '未执行新增保存验证。',
+            };
+        }
         if (text === '录制设置的步骤预期全部满足') {
             const assertions = this.events.filter((event) => event.action === 'step-assertion');
             const passed =
@@ -1035,7 +1201,7 @@ export class Engine {
             reason: passed ? '明确断言满足' : '实际页面状态与该预期不符，需核对需求或定位证据',
         };
     }
-    async runCase(c) {
+    async runCase(c, { continueRecording = false } = {}) {
         this.current = c;
         this.actions = 0;
         this.events = [];
@@ -1096,15 +1262,40 @@ export class Engine {
                     '用例包含审批流程操作或审批开关，不执行；仅展示审批状态的用例不按关键词排除',
                 );
             const data = { ...parseData(c.data), ...this.config.data, runId: this.config.runId };
-            const steps = lines(variables(c.steps, data)),
-                expected = lines(variables(c.expected, data)),
-                preconditions = lines(variables(c.preconditions, data));
+            let steps = lines(variables(c.steps, data));
+            let expected = lines(variables(c.expected, data));
+            const preconditions = lines(variables(c.preconditions, data));
+            if (data.recordedScene?.kind === 'create') {
+                steps = addCreateVerification(steps);
+                if (
+                    steps.some((step) => step.endsWith('按钮并验证新增记录')) &&
+                    !expected.includes(createExpectation)
+                ) {
+                    expected = [
+                        ...expected.filter((text) => text !== '业务结果待补充（录制时未设置预期）'),
+                        createExpectation,
+                    ];
+                    // Keep recorded templates intact in reports, even when replay substituted secrets.
+                    result.steps = addCreateVerification(lines(c.steps))
+                        .map((step, i) => `${i + 1}. ${step}`)
+                        .join('\n');
+                    result.expected = [
+                        ...lines(c.expected).filter(
+                            (text) => text !== '业务结果待补充（录制时未设置预期）',
+                        ),
+                        createExpectation,
+                    ].join('\n');
+                }
+            }
             if (!steps.length || !expected.length)
                 throw new Halt('用例内容缺失', '需要明确的操作步骤和预期结果');
             healthExpected = expected.filter((text) => healthAssertions.has(text));
             if (healthExpected.length) this.diagnostics?.begin(c.id);
             touchedPage = true;
-            await this.resetCase(c.url || this.config.url, { force: healthExpected.length > 0 });
+            if (!continueRecording)
+                await this.resetCase(c.url || this.config.url, {
+                    force: healthExpected.length > 0,
+                });
             this.phase = 'precondition';
             const scopeSnapshot = await observe(this.page);
             const titleAreas = scopeNames(
@@ -1223,6 +1414,14 @@ export class Engine {
                 : '跳过（未完成）';
             result.category = e.category || '执行器异常';
             result.reason = e.message;
+            if (e.createResult) {
+                result.status = e.createResult.status === '失败' ? '失败' : '部分验证';
+                result.assertions.push({
+                    text: createExpectation,
+                    kind: 'recorded-create',
+                    ...e.createResult,
+                });
+            }
         }
         if (healthExpected.length) {
             const monitored = this.diagnostics?.active;
@@ -1260,6 +1459,7 @@ export class Engine {
                     .map((a) => a.text + '：' + a.reason)
                     .join('；') || '所有步骤已执行，所有预期断言通过';
         }
+        result.stepsCompleted = completed;
         result.actions = this.events;
         result.duration_ms = Date.now() - started;
         result.network_errors = this.failures.slice(failuresAt);
