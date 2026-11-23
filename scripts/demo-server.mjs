@@ -3,7 +3,28 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 const port = Number(process.env.PORT || 8765);
 const html = await fs.readFile(new URL('../examples/demo.html', import.meta.url), 'utf8');
-http.createServer((req, res) => {
+const reactAssets = new Map([
+    ['index.html', 'text/html'],
+    ['workspace.js', 'text/javascript'],
+    ['workspace.css', 'text/css'],
+]);
+http.createServer(async (req, res) => {
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+    if (pathname === '/react-demo' || pathname.startsWith('/react-demo/')) {
+        const page = ['/react-demo', '/react-demo/', '/react-demo/realtime'].includes(pathname);
+        const file = page ? 'index.html' : pathname.slice('/react-demo/'.length);
+        if (!reactAssets.has(file)) return res.writeHead(404).end();
+        try {
+            const body = await fs.readFile(
+                new URL('../examples/react-demo/' + file, import.meta.url),
+            );
+            return res
+                .writeHead(200, { 'Content-Type': reactAssets.get(file) + '; charset=utf-8' })
+                .end(body);
+        } catch {
+            return res.writeHead(500).end('Demo file unavailable');
+        }
+    }
     if (req.url === '/favicon.ico') {
         res.writeHead(204);
         res.end();

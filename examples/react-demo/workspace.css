@@ -1,0 +1,361 @@
+:root {
+    --ink: #172d42;
+    --muted: #53677a;
+    --line: #d6e0e7;
+    --accent: #136a71;
+}
+body {
+    margin: 0;
+    color: var(--ink);
+    background: #f4f7f9;
+    font-family:
+        Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif;
+}
+.boot {
+    padding: 40px;
+}
+.shell {
+    display: flex;
+    min-height: 100vh;
+}
+.side {
+    display: flex;
+    flex: none;
+    background: #fff;
+    border-right: 1px solid var(--line);
+}
+.rail {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    gap: 8px;
+    width: 64px;
+    background: #192f42;
+    color: #d1e3e8;
+}
+.monogram {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    margin: 15px 0 28px;
+    border: 1px solid #719595;
+    border-radius: 8px;
+    color: #e1faf3;
+    font-size: 23px;
+    font-weight: 700;
+}
+.rail-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    cursor: pointer;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #c2d6dd;
+    font-size: 20px;
+}
+.rail-icon.current,
+.rail-icon:hover {
+    color: #e0fff6;
+    background: #355565;
+}
+/* These portaled labels overlap adjacent controls and contain no interactive content. */
+.ant-tooltip {
+    pointer-events: none;
+}
+.menu {
+    position: relative;
+    width: 191px;
+    padding: 0 14px 70px;
+}
+.brand {
+    display: flex;
+    align-items: center;
+    height: 66px;
+    padding-left: 10px;
+    font-size: 20px;
+    letter-spacing: -0.6px;
+}
+.menu h2 {
+    margin: 31px 10px 11px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+}
+.menu a {
+    display: block;
+    padding: 9px 10px;
+    border-radius: 5px;
+    color: var(--ink);
+}
+.menu a:hover,
+.menu a[aria-current='page'] {
+    background: #e6f2ef;
+    color: #125d60;
+}
+.menu .other-demo {
+    position: absolute;
+    bottom: 18px;
+    left: 14px;
+    font-size: 12px;
+    color: var(--muted);
+}
+.workspace {
+    flex: 1;
+    min-width: 0;
+}
+header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 66px;
+    background: white;
+    border-bottom: 1px solid var(--line);
+    padding: 0 clamp(20px, 4vw, 60px);
+}
+header span {
+    color: var(--muted);
+}
+header .slash {
+    color: #9cafbe;
+}
+main {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: clamp(30px, 4vw, 58px) clamp(20px, 4vw, 60px);
+}
+h1,
+h2 {
+    color: var(--ink);
+}
+h1 {
+    margin: 0 0 8px;
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 620;
+    line-height: 1.2;
+    letter-spacing: -1.5px;
+}
+h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+.intro {
+    margin: 0 0 30px;
+    color: var(--muted);
+    font-size: 15px;
+}
+.surface {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: white;
+}
+.overview {
+    padding: 26px;
+}
+.figures {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 30px 0 20px;
+}
+.figures > div {
+    border-left: 2px solid var(--line);
+    padding-left: 16px;
+    color: var(--muted);
+}
+.figures strong {
+    display: block;
+    color: var(--ink);
+    font-size: 30px;
+    font-weight: 560;
+    font-variant-numeric: tabular-nums;
+}
+.distribution {
+    height: 5px;
+    background: #dae4e9;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.distribution div {
+    height: 100%;
+    background: var(--accent);
+}
+.surface .ant-tabs-bar {
+    margin: 0;
+    padding-left: 22px;
+}
+.ant-tabs-nav .ant-tabs-tab-active,
+.ant-tabs-nav .ant-tabs-tab:hover,
+.ant-btn-link {
+    color: var(--accent);
+}
+.ant-tabs-ink-bar,
+.ant-btn-primary {
+    background: var(--accent);
+}
+.ant-btn-primary {
+    border-color: var(--accent);
+}
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
+    background: #18565e;
+    border-color: #18565e;
+}
+.table-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 22px;
+}
+.count {
+    color: var(--muted);
+    margin-left: 6px;
+    font-size: 13px;
+    font-weight: 400;
+}
+.table-wrap {
+    overflow-x: auto;
+}
+.table-wrap table {
+    min-width: 640px;
+}
+.record-name {
+    font-weight: 550;
+    color: var(--ink);
+}
+.status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #506476;
+}
+.status::before {
+    content: '';
+    height: 7px;
+    width: 7px;
+    background: #8194a3;
+    border-radius: 50%;
+}
+.status.online::before {
+    background: #16836f;
+}
+.actions {
+    display: flex;
+    align-items: center;
+}
+.actions .ant-btn {
+    width: 32px;
+    padding: 0;
+}
+.ant-drawer-title,
+.ant-modal-title {
+    color: var(--ink);
+    font-size: 18px;
+}
+.template-list {
+    display: grid;
+    gap: 12px;
+}
+.template {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-align: left;
+    cursor: pointer;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px;
+    color: var(--ink);
+}
+.template:hover,
+.template:focus {
+    border-color: var(--accent);
+}
+.template > .anticon:first-child {
+    font-size: 22px;
+    color: var(--accent);
+}
+.template > .anticon:last-child {
+    margin-left: auto;
+}
+.template small {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 13px;
+}
+.template-summary {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 22px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+}
+.config-form .ant-form-item {
+    margin-bottom: 16px;
+}
+.time-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+.drawer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+.form-error {
+    color: #a52732;
+}
+@media (max-width: 800px) {
+    .side {
+        flex-direction: column;
+        border: 0;
+    }
+    .shell {
+        flex-direction: column;
+    }
+    .rail {
+        flex-direction: row;
+        width: 100%;
+        padding: 6px 14px;
+    }
+    .monogram {
+        margin: 0 12px 0 0;
+    }
+    .menu {
+        width: 100%;
+        padding: 6px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+    }
+    .brand,
+    .menu h2 {
+        display: none;
+    }
+    .menu .other-demo {
+        position: static;
+        margin-left: auto;
+    }
+    header {
+        min-height: 42px;
+    }
+    .figures > div {
+        padding-left: 8px;
+    }
+}
