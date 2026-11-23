@@ -1,5 +1,6 @@
 import { recordedReviewPrefix } from './language.mjs';
 import { resolveUiAdapters } from './ui-adapters.mjs';
+import { selectOptionName, selectOptionChoices } from './ui-adapter-select.mjs';
 import { businessResponseFailed } from './diagnostics.mjs';
 import {
     recordedFormItem,
@@ -92,7 +93,12 @@ export function renderRecordingSpec(recording, channel) {
     )
         statements.push(`const selectMarkup = ${JSON.stringify(selectMarkup)};`);
     if (recording.actions.some((action) => action.target?.locator === 'selectOption'))
-        statements.push(onlyExpandedSelect.toString(), recordedSelectOption.toString());
+        statements.push(
+            selectOptionName.toString(),
+            selectOptionChoices.toString(),
+            onlyExpandedSelect.toString(),
+            recordedSelectOption.toString(),
+        );
     const creates = recordedCreateActions(recording.actions);
     if (creates.size)
         statements.push(
@@ -127,6 +133,27 @@ export function renderRecordingSpec(recording, channel) {
             continue;
         }
         const target = recordedLocator(action.target, ui);
+        if (
+            target &&
+            action.target.locator === 'selectOption' &&
+            ['click', 'assert'].includes(action.kind)
+        ) {
+            statements.push('    {', `        const option = ${target};`, '        try {');
+            if (action.kind === 'assert') {
+                const check =
+                    action.assertion === 'value'
+                        ? `expect(await option.inputValue()).toBe(${JSON.stringify(action.value)})`
+                        : 'expect(await option.isVisible()).toBe(true)';
+                statements.push(`            ${check};`);
+            } else statements.push('            await option.click();');
+            statements.push(
+                '        } finally {',
+                '            await option.dispose();',
+                '        }',
+                '    }',
+            );
+            continue;
+        }
         if (target && creates.has(action)) {
             statements.push(
                 '    {',

@@ -1,3 +1,5 @@
+import { selectOptionChoices } from './ui-adapter-select.mjs';
+
 export function selectSelectors(uiAdapters) {
     // Ant can put the semantic input inside its clickable surface and nest popup wrappers.
     const surface = `:is(${uiAdapters.select.trigger})`;
@@ -60,21 +62,19 @@ export async function recordedSelectOption(
     scope = page,
     timeout = 4000,
 ) {
-    const words = name
-        .trim()
-        .split(/\s+/)
-        .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    const exactText = new RegExp('^\\s*' + words.join('\\s+') + '\\s*$');
-    const choices = (within) =>
-        within
-            .getByRole('option', { name, exact: true })
-            .or(
-                within
-                    .locator(`:is(${markup.option}):not([role=option])`)
-                    .filter({ hasText: exactText }),
-            )
-            .filter({ visible: true });
-    if (!opener) return choices(scope);
+    const choices = (within) => selectOptionChoices(within, name, markup);
+    if (!opener) {
+        const deadline = Date.now() + timeout;
+        do {
+            const { target } = await choices(scope);
+            if (target) return target;
+            if (Date.now() >= deadline) break;
+            await new Promise((resolve) =>
+                setTimeout(resolve, Math.min(50, deadline - Date.now())),
+            );
+        } while (Date.now() <= deadline);
+        throw Error(`展开的下拉框中无法唯一定位选项「${name}」`);
+    }
 
     // An ancestor chain is ordered from root to leaf. Its last matching item is the
     // nearest owner, including when the adapter uses attributes or compound selectors.
@@ -110,8 +110,8 @@ export async function recordedSelectOption(
             owner = popups.and(page.locator(`:not(:is(${markup.item}) *)`));
         }
         if (owner) {
-            const target = choices(owner);
-            if ((await target.count()) === 1) return target;
+            const { target } = await choices(owner);
+            if (target) return target;
         }
         if (Date.now() >= deadline) break;
         await new Promise((resolve) => setTimeout(resolve, Math.min(50, deadline - Date.now())));

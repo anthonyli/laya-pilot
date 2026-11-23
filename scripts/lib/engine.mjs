@@ -277,7 +277,9 @@ export class Engine {
                                   container,
                                   timeout,
                               );
-                    await locator.waitFor({ state: 'visible', timeout });
+                    if (recordedRole === 'fieldOption')
+                        await locator.waitForElementState('visible', { timeout });
+                    else await locator.waitFor({ state: 'visible', timeout });
                 } else if (recordedRole === 'option') {
                     locator = await recordedSelectOption(
                         this.page,
@@ -286,7 +288,7 @@ export class Engine {
                         this.selectMarkup,
                         container,
                     );
-                    await locator.waitFor({ state: 'visible', timeout });
+                    await locator.waitForElementState('visible', { timeout });
                 } else if (recordedRole === 'cardTitle') {
                     locator = await findDialogCard(container, actual, this.ui.cardTitle);
                 } else if (['namedNavIcon', 'namedIcon'].includes(recordedRole)) {
@@ -311,6 +313,8 @@ export class Engine {
                     await locator.waitFor({ state: 'visible', timeout });
                 }
             } catch {
+                if (recordedRole === 'fieldOption' || recordedRole === 'option')
+                    await locator?.dispose();
                 throw new Halt(
                     (this.exactRecord ? '记录' : scope === 'dialog' ? '弹窗' : '页面') +
                         '操作范围不明确',
@@ -343,24 +347,29 @@ export class Engine {
             const rowKey = ordinal ? undefined : await this.targetRow(name);
             found = await this.chooseTarget(name, 'click', { rowKey, ordinal });
         }
-        this.guard(found.control, step);
-        if (this.pendingPreconditions?.length && this.isWriteControl(found.control, step))
-            throw new Halt(
-                '前置条件未验证',
-                '业务写入前仍有未证明的前提：' + this.pendingPreconditions.join('；'),
-            );
-        if (found.control.href) {
-            const u = new URL(found.control.href, this.page.url());
-            if (!this.config.origins.includes(u.origin))
-                throw new Halt('目标地址超出测试范围', '链接不属于本次配置的测试站点。');
+        try {
+            this.guard(found.control, step);
+            if (this.pendingPreconditions?.length && this.isWriteControl(found.control, step))
+                throw new Halt(
+                    '前置条件未验证',
+                    '业务写入前仍有未证明的前提：' + this.pendingPreconditions.join('；'),
+                );
+            if (found.control.href) {
+                const u = new URL(found.control.href, this.page.url());
+                if (!this.config.origins.includes(u.origin))
+                    throw new Halt('目标地址超出测试范围', '链接不属于本次配置的测试站点。');
+            }
+            console.log('  Laya → ' + found.control.name + ' [' + found.control.role + ']');
+            this.navFailureStart = this.failures.length;
+            await found.locator.click();
+            this.exactRecord = null;
+            await settle(this.page, this.config.delay);
+            await this.ready();
+            return found.control;
+        } finally {
+            if (recordedRole === 'fieldOption' || recordedRole === 'option')
+                await found.locator.dispose();
         }
-        console.log('  Laya → ' + found.control.name + ' [' + found.control.role + ']');
-        this.navFailureStart = this.failures.length;
-        await found.locator.click();
-        this.exactRecord = null;
-        await settle(this.page, this.config.delay);
-        await this.ready();
-        return found.control;
     }
     async revealRowMenu(name) {
         if (!this.rowKey) return;

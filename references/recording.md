@@ -50,4 +50,6 @@ laya replay recorded-cases/case.xlsx --url "$TEST_URL" --ui-adapter ./ui-adapter
 
 Excel 保留字段名称和选项值，回放时加载当前项目的适配文件。配套的 Playwright 脚本内嵌录制时的选择器。自定义弹层可以通过 `aria-controls` 指向页面其他位置的选项列表。无法唯一确认字段、选项或表格记录时，录制会在原位标记待补录，回放会在对应步骤说明原因。
 
+下拉选项的名称与可见性由通用适配层统一处理，录制、Excel 回放和独立脚本使用同一规则：优先读取选项自身的 `aria-labelledby` / `aria-label`，其次读取可见文字和标题。子图标的无障碍名称不会拼入选项值，隐藏或 `aria-hidden` 的副本不参与匹配；所属列表中存在多个同名选项时仍会停止。
+
 独立安装的 `laya` 命令用法相同，把 `node scripts/run.mjs` 换成 `laya`、`node scripts/setup.mjs` 换成 `laya setup` 即可；两者的配置互不共享。

@@ -12,6 +12,7 @@ import {
 } from './auth-state.mjs';
 import { randomBytes } from 'node:crypto';
 import { resolveUiAdapters, validateUiAdapterSelectors } from './ui-adapters.mjs';
+import { selectOptionName } from './ui-adapter-select.mjs';
 import { formItemLabel, onlyExpandedSelect, selectSelectors } from './recorded-select.mjs';
 import {
     navigationScope,
@@ -63,6 +64,7 @@ function installRecorder(
     declaredIconName,
     formItemLabel,
     onlyExpandedSelect,
+    selectOptionName,
 ) {
     if (location.origin !== origin) return;
     const actionControls =
@@ -419,11 +421,7 @@ function installRecorder(
             const childControl = clicked.closest('button, a[href], input, [role=button]');
             if (childControl && childControl !== option && option.contains(childControl))
                 return false;
-            const optionName = (el) =>
-                labelled(el, 'aria-labelledby') ||
-                text(el.getAttribute('aria-label')) ||
-                visibleText(el) ||
-                text(el.getAttribute('title'));
+            const optionName = selectOptionName;
             const name = optionName(option);
             if (!name || option.closest('[aria-disabled=true]')) return false;
             const popup = option.closest(selectMarkup.popup) || option.closest('[role=listbox]');
@@ -1263,7 +1261,7 @@ export async function captureRecording({
             selectMarkup: selectSelectors(ui),
         };
         await context.addInitScript({
-            content: `(${installRecorder})(${JSON.stringify(recorderOptions)}, ${iconOwner}, ${declaredIconName}, ${formItemLabel}, ${onlyExpandedSelect})`,
+            content: `(${installRecorder})(${JSON.stringify(recorderOptions)}, ${iconOwner}, ${declaredIconName}, ${formItemLabel}, ${onlyExpandedSelect}, ${selectOptionName})`,
         });
         await page.goto(entryUrl, { waitUntil: 'domcontentloaded' });
         const initial = await readState();
