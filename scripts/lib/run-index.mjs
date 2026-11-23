@@ -118,6 +118,7 @@ const PLAYWRIGHT_STATUS = {
     skipped: '跳过',
     interrupted: '中断',
 };
+export const INTERRUPTED_REPLAY_VERDICT = '回放已中止，结果不完整';
 
 function fromPlaywright(report, out) {
     const relative = (file) => (file ? path.relative(out, file).split(path.sep).join('/') : '');
@@ -139,10 +140,14 @@ function fromPlaywright(report, out) {
                 const evidence = attempts.flatMap((a) => a.files);
                 const trace = evidence.findLast((a) => a.name === 'trace');
                 const evidenceFile = attempts.findLast((a) => a.screenshot)?.screenshot || trace;
-                const status =
-                    t.status === 'expected' && t.expectedStatus === 'failed'
-                        ? '预期失败'
-                        : statusLabel(t.status || last?.result.status);
+                const lastStatus = last?.result.status;
+                let status = statusLabel(t.status || lastStatus);
+                // Playwright folds interrupted attempts and tests that never ran into "skipped".
+                if (lastStatus === 'interrupted') status = statusLabel(lastStatus);
+                else if (t.status === 'skipped' && !last && t.expectedStatus !== 'skipped')
+                    status = '未执行';
+                else if (t.status === 'expected' && t.expectedStatus === 'failed')
+                    status = '预期失败';
                 cases.push({
                     id: String(cases.length + 1).padStart(3, '0'),
                     title: [...trail, spec.title].filter(Boolean).join(' › '),
@@ -195,6 +200,7 @@ function fromPlaywright(report, out) {
         kind: '录制回放（Playwright）',
         source: report.config?.rootDir,
         cases,
+        interrupted: cases.some((c) => c.status === PLAYWRIGHT_STATUS.interrupted),
         error: report.errors?.length
             ? { message: report.errors.map((e) => e.message).join('\n') }
             : null,
@@ -203,7 +209,7 @@ function fromPlaywright(report, out) {
 }
 
 /** Reliability signals: what a reader must know before trusting the result. */
-export function assess(view) {
+export function assess(view, { interrupted = false } = {}) {
     const { cases } = view;
     const signals = [];
     const add = (level, text) => signals.push({ level, text });
@@ -254,16 +260,16 @@ export function assess(view) {
     if (view.modelCalls === 0 && view.kind !== '录制回放（Playwright）')
         add('info', '本轮没有调用模型，结果来自固定规则和断言。');
 
-    const verdict = signals.some((s) => s.level === 'bad')
-        ? { level: 'bad', text: '未通过' }
-        : allSkipped
-          ? { level: 'warn', text: '未执行' }
-          : flaky
-            ? { level: 'warn', text: '结果不稳定，需要复核' }
-            : signals.some((s) => s.level === 'warn')
-              ? { level: 'warn', text: '通过，但需要复核' }
-              : { level: 'ok', text: '通过，证据完整' };
-    if (!signals.length)
+    let verdict;
+    if (interrupted || view.interrupted)
+        verdict = { level: 'bad', text: INTERRUPTED_REPLAY_VERDICT };
+    else if (signals.some((s) => s.level === 'bad')) verdict = { level: 'bad', text: '未通过' };
+    else if (allSkipped) verdict = { level: 'warn', text: '未执行' };
+    else if (flaky) verdict = { level: 'warn', text: '结果不稳定，需要复核' };
+    else if (signals.some((s) => s.level === 'warn'))
+        verdict = { level: 'warn', text: '通过，但需要复核' };
+    else verdict = { level: 'ok', text: '通过，证据完整' };
+    if (!signals.length && verdict.level === 'ok')
         add('ok', '全部用例通过，没有发现阻断、未验证预期、执行错误或缺失的截图。');
     return {
         verdict,
@@ -502,9 +508,9 @@ export async function latestReportIndex(cwd = process.cwd()) {
 }
 
 /** Write index.html and update runs/laya-pilot/latest.json for a finished run. */
-export async function finalizeRun(out, cwd = process.cwd()) {
+export async function finalizeRun(out, cwd = process.cwd(), options) {
     const view = await readRun(out);
-    const assessment = assess(view);
+    const assessment = assess(view, options);
     // Every run gets a text report; Excel runners write a richer one themselves.
     if (!(await exists(path.join(out, RUN_FILES.summary))))
         await fs.writeFile(path.join(out, RUN_FILES.summary), renderSummary(view, assessment));

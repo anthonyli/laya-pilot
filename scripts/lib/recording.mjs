@@ -12,7 +12,7 @@ import {
     runDirectoryName,
     uniqueRunDirectory,
 } from './run-layout.mjs';
-import { finalizeRun, latestReportIndex } from './run-index.mjs';
+import { finalizeRun, INTERRUPTED_REPLAY_VERDICT, latestReportIndex } from './run-index.mjs';
 import { safeText, safeUrl } from './diagnostics.mjs';
 
 const require = createRequire(import.meta.url);
@@ -273,15 +273,18 @@ async function replay(root, input, options) {
             `Running ${path.basename(spec)} in ${options.headed ? 'a visible browser' : 'headless mode'}.`,
         );
         const code = await runPlaywright(root, ['test', '--config', config], process.cwd(), env);
+        const interrupted = code === 130;
         const result = await fs
             .readFile(path.join(out, RUN_FILES.results), 'utf8')
             .catch((error) => {
                 if (error.code !== 'ENOENT') throw error;
                 return null;
             });
-        const stats = result ? JSON.parse(result).stats : null;
-        const finalized = result ? await finalizeRun(out).catch(() => null) : null;
+        const finalized = result
+            ? await finalizeRun(out, process.cwd(), { interrupted }).catch(() => null)
+            : null;
         const assessment = finalized?.assessment;
+        const stats = !assessment && !interrupted && result ? JSON.parse(result).stats : null;
         const counts =
             assessment ??
             (stats && {
@@ -293,10 +296,17 @@ async function replay(root, input, options) {
             });
         const summary =
             counts?.total > 0 &&
-            `${counts.passed} passed · ${counts.failed} failed · ${counts.skipped} skipped${counts.flaky ? ` · ${counts.flaky} flaky` : ''}`;
+            `${counts.passed} passed · ${counts.failed} failed · ${counts.skipped} skipped${counts.flaky ? ` · ${counts.flaky} flaky` : ''}${counts.blocked ? ` · ${counts.blocked} incomplete` : ''}`;
         const label = assessment
             ? resultLabel(Number(assessment.verdict.level !== 'ok'), assessment.verdict.text)
-            : resultLabel(code, code === 0 ? 'Run complete' : 'Run did not pass');
+            : resultLabel(
+                  code,
+                  interrupted
+                      ? INTERRUPTED_REPLAY_VERDICT
+                      : code === 0
+                        ? 'Run complete'
+                        : 'Run did not pass',
+              );
         printPanel('Replay', label, [
             ...(summary ? [['RESULT', [summary]]] : []),
             ['RUN DIRECTORY', [out]],
