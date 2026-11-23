@@ -191,3 +191,58 @@ test('replay reports agree on skipped, expected and flaky Playwright outcomes', 
         await fs.access(path.join(dir, 'flaky', decodeURIComponent(link[1])));
     }
 });
+
+test(
+    'replay reports an interrupted test separately from a voluntary skip',
+    { skip: process.platform === 'win32' },
+    async (t) => {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-replay-interrupt-'));
+        t.after(() => fs.rm(dir, { recursive: true, force: true }));
+        const spec = 'interrupt.spec.cjs';
+        await fs.writeFile(
+            path.join(dir, spec),
+            `const { test, expect } = require('playwright/test');
+test('passes', () => { expect(true).toBe(true); });
+test.skip('voluntary skip', () => {});
+test('interrupted case', async () => {
+    console.log('interrupt fixture ready');
+    await new Promise((resolve) => setTimeout(resolve, 30_000));
+});
+test('queued case', () => {});`,
+        );
+        const env = { ...process.env, LAYA_HOME: path.join(dir, 'state'), BROWSER_CHANNEL: '' };
+        const replay = exec(process.execPath, [cli, 'replay', spec, '--out', 'report'], {
+            cwd: dir,
+            env,
+            timeout: 20_000,
+        });
+        let stdout = '';
+        const interrupt = (chunk) => {
+            stdout += chunk;
+            if (stdout.includes('interrupt fixture ready')) {
+                replay.child.stdout.off('data', interrupt);
+                replay.child.kill('SIGINT');
+            }
+        };
+        replay.child.stdout.on('data', interrupt);
+        const verdict = '回放已中止，结果不完整';
+        await assert.rejects(replay, {
+            code: 130,
+            stdout: /回放已中止，结果不完整[\s\S]*1 passed · 0 failed · 1 skipped · 2 incomplete/,
+        });
+        const index = await fs.readFile(path.join(dir, 'report', 'index.html'), 'utf8');
+        const summary = await fs.readFile(path.join(dir, 'report', 'summary.md'), 'utf8');
+        const latest = JSON.parse(
+            await fs.readFile(path.join(dir, 'runs', 'laya-pilot', 'latest.json'), 'utf8'),
+        );
+        assert.match(index, new RegExp(`<h2>${verdict}</h2>`));
+        assert.ok(summary.startsWith(`# ${verdict}\n`));
+        assert.match(summary, /\|interrupted case\|中断\|/);
+        assert.match(summary, /\|voluntary skip\|跳过\|/);
+        assert.match(summary, /\|queued case\|未执行\|/);
+        assert.equal(latest.verdict, verdict);
+        assert.equal(latest.passed, 1);
+        assert.equal(latest.skipped, 1);
+        assert.equal(latest.blocked, 2);
+    },
+);
