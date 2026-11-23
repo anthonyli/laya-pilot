@@ -95,6 +95,19 @@ test('finalizeRun writes an index that links every screenshot and a summary', as
                         },
                     ],
                     assertions: [{ status: '失败' }],
+                    health_checks: [
+                        { status: '通过', text: '页面检查' },
+                        { status: '未验证', text: '环境检查' },
+                        { status: '未执行', text: '后续检查' },
+                        { status: '待补充', text: '业务预期' },
+                        { status: '失败', text: '保存校验' },
+                        { status: '失败', severity: 'info', text: '后台读取' },
+                    ],
+                    browser_events: [
+                        { kind: 'pageerror', detail: 'script failed' },
+                        { kind: 'requestcancelled', method: 'GET', url: '/cancelled' },
+                        { kind: 'api-body', method: 'GET', url: '/background', severity: 'info' },
+                    ],
                 },
             ],
         }),
@@ -106,6 +119,18 @@ test('finalizeRun writes an index that links every screenshot and a summary', as
         html.includes(['cases', '001-缺失', '01-预期1-失败.png'].map(encodeURIComponent).join('/')),
     );
     assert.ok(html.includes('&lt;缺失&gt;'), 'case text is escaped');
+    for (const [tone, text] of [
+        ['pass', '通过 · 页面检查'],
+        ['unverified', '未验证 · 环境检查'],
+        ['blocked', '未执行 · 后续检查'],
+        ['blocked', '待补充 · 业务预期'],
+        ['fail', '失败 · 保存校验'],
+        ['neutral', '失败 · 后台读取'],
+        ['fail', '前端异常：script failed'],
+        ['neutral', '请求取消 GET /cancelled'],
+        ['neutral', '接口返回失败 GET /background'],
+    ])
+        assert.ok(html.includes(`<li class="${tone}">${text}`), text);
     assert.doesNotMatch(html, /show-trace/, 'no trace hint without a trace file');
     assert.match(await fs.readFile(path.join(out, 'summary.md'), 'utf8'), /# 未通过/);
     assert.equal(await latestReportIndex(cwd), path.join(out, 'index.html'));

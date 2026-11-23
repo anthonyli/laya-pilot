@@ -26,6 +26,21 @@ export function outcome(status = '') {
 
 const count = (items, test) => items.filter(test).length;
 
+function diagnosticTone(entry, fallback = 'fail') {
+    if (entry.severity === 'info' || entry.kind === 'requestcancelled') return 'neutral';
+    if (entry.severity === 'warning') return 'unverified';
+    if (typeof entry.status === 'string' && !/^\d+$/.test(entry.status))
+        return outcome(entry.status);
+    return fallback;
+}
+
+function browserDiagnostic(event) {
+    return {
+        tone: diagnosticTone(event),
+        text: event.kind ? eventLabel(event) : event.message || event.text || '',
+    };
+}
+
 function fromOrdinary(summary) {
     const cases = (summary.results || []).map((r) => ({
         id: r.id,
@@ -50,10 +65,11 @@ function fromOrdinary(summary) {
         })),
         assertions: r.assertions || [],
         checks: r.health_checks || [],
-        events: (r.browser_events || []).map((e) =>
-            e.kind ? eventLabel(e) : e.message || e.text || '',
-        ),
-        network: (r.network_errors || []).map((e) => `${e.status ?? ''} ${e.url ?? ''}`.trim()),
+        events: (r.browser_events || []).map(browserDiagnostic),
+        network: (r.network_errors || []).map((e) => ({
+            tone: diagnosticTone(e),
+            text: `${e.status ?? ''} ${e.url ?? ''}`.trim(),
+        })),
         unidentified: (r.unidentified_controls || []).length,
     }));
     return {
@@ -90,9 +106,7 @@ function fromStructured(summary) {
         })),
         assertions: [],
         checks: [],
-        events: (r.browserEvents || []).map((e) =>
-            e.kind ? eventLabel(e) : e.message || e.text || '',
-        ),
+        events: (r.browserEvents || []).map(browserDiagnostic),
         network: [],
     }));
     return {
@@ -224,7 +238,11 @@ export function assess(view, { interrupted = false } = {}) {
     const assertions = cases.flatMap((c) => c.assertions);
     const unverified = count(assertions, (a) => outcome(a.status) === 'unverified');
     const checks = cases.flatMap((c) => c.checks);
-    const problems = cases.reduce((n, c) => n + c.events.length + c.network.length, 0);
+    const problems = cases.reduce(
+        (n, c) =>
+            n + count([...c.events, ...c.network], (entry) => !entry.tone || entry.tone === 'fail'),
+        0,
+    );
     const missingShots = cases.reduce(
         (n, c) => n + (c.screenshotError ? 1 : 0) + count(c.timeline, (t) => t.error),
         0,
@@ -243,7 +261,7 @@ export function assess(view, { interrupted = false } = {}) {
             'warn',
             `${unverified || unverifiedCases} 条预期无法自动判定（未验证），需要补充可观察的预期或人工确认。`,
         );
-    const failedChecks = count(checks, (c) => outcome(c.status) === 'fail');
+    const failedChecks = count(checks, (c) => diagnosticTone(c, 'neutral') === 'fail');
     if (failedChecks || problems)
         add('warn', `执行中发现 ${failedChecks + problems} 个页面、脚本或接口错误，详见各用例。`);
     if (count(checks, (c) => outcome(c.status) === 'unverified'))
@@ -332,7 +350,10 @@ function caseHtml(c) {
         )
         .join('\n');
     const issues = [
-        ...c.checks.map((x) => `${x.status} · ${x.text}${x.reason ? '：' + x.reason : ''}`),
+        ...c.checks.map((x) => ({
+            tone: diagnosticTone(x, 'neutral'),
+            text: `${x.status} · ${x.text}${x.reason ? '：' + x.reason : ''}`,
+        })),
         ...c.events,
         ...c.network,
     ];
@@ -340,7 +361,7 @@ function caseHtml(c) {
 <summary><span class="badge ${kind}">${escape(c.status)}</span> <b>${escape(c.id)}</b> ${escape(c.title)}
 <small>${escape(c.location || '')}${c.durationMs != null ? ` · ${Math.round(c.durationMs)}ms` : ''}</small></summary>
 ${c.reason ? `<p class="reason">${escape(c.reason)}${c.category ? ` <small>（${escape(c.category)}）</small>` : ''}</p>` : ''}
-${issues.length ? `<ul class="issues">${issues.map((i) => `<li>${escape(i)}</li>`).join('')}</ul>` : ''}
+${issues.length ? `<ul class="issues">${issues.map((i) => `<li class="${escape(i.tone || 'fail')}">${escape(i.text ?? i)}</li>`).join('')}</ul>` : ''}
 ${rows ? `<ol class="timeline">${rows}</ol>` : ''}
 ${c.screenshot ? `<div class="final"><b>用例结束时的页面</b>${shot(c.screenshot, '用例结束')}</div>` : ''}
 ${c.screenshotError ? `<p class="note">${escape(c.screenshotError)}</p>` : ''}
@@ -357,7 +378,7 @@ export function renderIndex(view, assessment, files, hasTrace = false) {
     );
     const { verdict, signals } = assessment;
     const stat = (label, value, kind) =>
-        `<div class="stat ${kind}"><b>${value}</b><span>${label}</span></div>`;
+        `<div class="stat ${value ? kind : ''}"><b>${value}</b><span>${label}</span></div>`;
     const links = files
         .map(
             ([name, description]) =>
@@ -375,8 +396,10 @@ body{max-width:1100px;margin:0 auto;padding:24px}h1{margin:0 0 4px}small{color:v
 .stats{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.stat{border:1px solid var(--line);border-radius:6px;padding:8px 16px;min-width:90px}.stat b{display:block;font-size:24px}.stat.fail b{color:var(--bad)}.stat.pass b{color:var(--ok)}.stat.blocked b,.stat.unverified b{color:var(--warn)}
 .case{border:1px solid var(--line);border-radius:6px;margin:8px 0;padding:8px 12px}.case.fail{border-color:var(--bad)}.case.flaky,.case.blocked,.case.unverified{border-color:var(--warn)}
 summary{cursor:pointer}.badge{display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;color:#fff;background:var(--info)}.badge.pass{background:var(--ok)}.badge.fail{background:var(--bad)}.badge.flaky,.badge.blocked,.badge.unverified{background:var(--warn)}
-.reason{white-space:pre-wrap}.note{color:var(--warn)}.issues{color:var(--bad)}
-.timeline{list-style:none;padding:0}.timeline li{border-top:1px solid var(--line);padding:8px 0;display:grid;grid-template-columns:1fr 280px;gap:12px;align-items:start}.timeline img{max-height:180px;object-fit:cover;object-position:top;width:100%}.timeline li.fail .step b{color:var(--bad)}
+.reason{white-space:pre-wrap}.note{color:var(--warn)}
+.issues>li.pass,.timeline>li.pass .step b{color:var(--ok)}.issues>li.fail,.timeline>li.fail .step b{color:var(--bad)}
+.issues>li:is(.unverified,.blocked,.flaky),.timeline>li:is(.unverified,.blocked,.flaky) .step b{color:var(--warn)}.issues>li.neutral,.timeline>li.neutral .step b{color:var(--info)}
+.timeline{list-style:none;padding:0}.timeline li{border-top:1px solid var(--line);padding:8px 0;display:grid;grid-template-columns:1fr 280px;gap:12px;align-items:start}.timeline img{max-height:180px;object-fit:cover;object-position:top;width:100%}
 img{max-width:100%;border:1px solid var(--line);border-radius:4px}.final{margin-top:8px}.final img{max-width:480px;max-height:360px;object-fit:cover;object-position:top;display:block}
 .files{font-size:13px}table{border-collapse:collapse}td{padding:2px 8px;border-bottom:1px solid var(--line)}
 </style></head><body>
