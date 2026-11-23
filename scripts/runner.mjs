@@ -18,6 +18,7 @@ import {
 } from './lib/diagnostics.mjs';
 import { authRoute, findRecordingAuth, rememberRecordingAuth } from './lib/recording-auth.mjs';
 import { openBrowser } from './lib/browser-provider.mjs';
+import { assessNavigationHealth, restoreNavigationDestinations } from './lib/recording-cases.mjs';
 import {
     loadLocalEnvironment,
     loadProjectConfig,
@@ -381,6 +382,7 @@ async function main() {
     apiKey = null;
     const input = await laya.request({ action: 'read_excel', path: path.resolve(config.excel) });
     if (!input.cases.length) throw Error('Excel未读取到用例：' + input.warnings.join('；'));
+    input.cases = restoreNavigationDestinations(input.cases, config.url);
     const selected = input.cases.filter(
         (c) =>
             !config.cases.length ||
@@ -567,6 +569,7 @@ async function main() {
                 { ...c, url: startUrl },
                 { continueRecording: followsPrevious },
             );
+            assessNavigationHealth(c, r);
             await traces.end(r, r.evidence_dir);
         }
         results.push(r);

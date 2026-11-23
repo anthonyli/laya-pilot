@@ -15,6 +15,7 @@ import {
     compareCreateStates,
     verifyCreateClick,
 } from './recorded-create.mjs';
+import { verifyRecordedDestination } from './recorded-destination.mjs';
 import { findDialogCard } from './recorded-card.mjs';
 import {
     navigationIconSelector,
@@ -1003,6 +1004,8 @@ export class Engine {
         }
         const spec = expectation(text),
             page = this.page;
+        if (spec.kind === 'navigation-url' || spec.kind === 'navigation-area')
+            return verifyRecordedDestination(page, text, spec, this.config.assertTimeout || 4000);
         if (spec.kind === 'exactRecord')
             return {
                 text,

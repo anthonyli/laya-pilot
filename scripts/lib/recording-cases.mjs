@@ -1,4 +1,4 @@
-import { isAreaSwitch, recordedReviewPrefix } from './language.mjs';
+import { isAreaSwitch, lines, recordedReviewPrefix } from './language.mjs';
 import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
 import { createExpectation } from './recorded-create.mjs';
 
@@ -434,6 +434,178 @@ function sceneTrigger(step) {
     return writeKind(button);
 }
 
+function navigationSteps(steps) {
+    const navigation = steps.filter((step) => !step.startsWith('检查步骤预期：'));
+    if (
+        !navigation.length ||
+        navigation.some((step) => {
+            if (step.startsWith('打开网址 ')) return false;
+            if (sceneTrigger(step) !== 'navigate') return true;
+            const control = step.match(/^点击「([^」]+)」(链接|菜单项)$/);
+            return control && writeControl.test(control[1]);
+        })
+    )
+        return null;
+    return navigation;
+}
+
+function navigationDestination(steps, url, origin) {
+    const navigation = navigationSteps(steps);
+    if (!navigation) return null;
+    const last = navigation.at(-1);
+    if (!/^切换到「|^点击「.+」(?:标签页|菜单项|链接)$|^打开网址 /.test(last)) return null;
+    const area = last.match(/^切换到「([^」]+)」区域$|^点击「([^」]+)」标签页$/);
+    const target = workbookUrl(url || last.match(/^打开网址 (.+)$/)?.[1], origin);
+    const destination = {};
+    if (
+        target &&
+        ![...new URL(target).searchParams.keys()].some((key) =>
+            /token|secret|password|auth|credential/i.test(key),
+        )
+    )
+        destination.url = target;
+    if (area) destination.area = area[1] || area[2];
+    return destination.url || destination.area ? destination : null;
+}
+
+function destinationExpectations(destination) {
+    return [
+        destination?.url && `已到达录制页面「${destination.url}」`,
+        destination?.area && `已选中录制区域「${destination.area}」`,
+    ].filter(Boolean);
+}
+
+function sceneOf(c) {
+    try {
+        return JSON.parse(c.data || '{}').recordedScene;
+    } catch {
+        return null;
+    }
+}
+
+// Original scenario workbooks only stored the entry URL of the following, dependent case.
+// Resolve it before --cases selection so a navigation case has the same oracle on its own.
+export function restoreNavigationDestinations(cases, url) {
+    if (!url || !URL.canParse(url)) return cases;
+    return cases.map((c, index) => {
+        const scene = sceneOf(c);
+        if (
+            scene?.kind !== 'navigate' ||
+            scene.destination ||
+            !lines(c.expected).includes(pendingExpectation)
+        )
+            return c;
+        const successor = cases[index + 1];
+        const next = successor && sceneOf(successor);
+        const steps = lines(c.steps);
+        const entry =
+            scene.url ||
+            steps.find((step) => step.startsWith('打开网址 '))?.slice('打开网址 '.length);
+        const linked =
+            next?.previous === c.id &&
+            next.account === scene.account &&
+            !lines(successor.steps)[0]?.startsWith('打开网址 ');
+        const observed =
+            linked && ((entry && next.url !== entry) || /^切换到「|」标签页$/.test(steps.at(-1)))
+                ? next.url
+                : null;
+        const destination = navigationDestination(steps, observed, new URL(url).origin);
+        if (!destination) return c;
+        const expected = lines(c.expected);
+        const autoHealth =
+            expected.includes(HEALTH_EXPECTATIONS.page) &&
+            expected.includes(HEALTH_EXPECTATIONS.browser);
+        const api =
+            autoHealth &&
+            expected.find(
+                (text) => text === HEALTH_EXPECTATIONS.api || text === optionalApiExpectation,
+            );
+        return {
+            ...c,
+            data: JSON.stringify({
+                ...JSON.parse(c.data),
+                recordedScene: {
+                    ...scene,
+                    destination: { ...destination, ...(api && { automaticApi: api }) },
+                },
+            }),
+            expected: [
+                ...expected.filter((text) => text !== pendingExpectation),
+                ...destinationExpectations(destination),
+            ].join('\n'),
+        };
+    });
+}
+
+export function assessNavigationHealth(c, result) {
+    const scene = sceneOf(c);
+    const destination = scene?.destination;
+    const api = destination?.automaticApi;
+    if (
+        scene?.kind !== 'navigate' ||
+        !result.stepsCompleted ||
+        !navigationSteps(lines(c.steps)) ||
+        ![HEALTH_EXPECTATIONS.api, optionalApiExpectation].includes(api) ||
+        lines(c.expected).filter((text) => text === api).length !== 1 ||
+        result.network_errors?.some((event) => event.status >= 400)
+    )
+        return;
+    const expected = destinationExpectations(destination);
+    if (
+        !expected.length ||
+        !expected.every((text) =>
+            result.assertions.some((a) => a.text === text && a.status === '通过'),
+        )
+    )
+        return;
+    const check = result.health_checks?.find((a) => a.kind === 'api' && a.text === api);
+    if (!check || check.status === '通过') return;
+    const events = (result.browser_events || []).filter((event) =>
+        ['api-body', 'http', 'requestfailed'].includes(event.kind),
+    );
+    if (!events.length && !(check.status === '未验证' && check.reason === '本轮未观察到接口请求。'))
+        return;
+    if (
+        !events.every(
+            (event) =>
+                event.kind === 'api-body' &&
+                ['GET', 'HEAD'].includes(event.method) &&
+                event.status >= 200 &&
+                event.status < 300 &&
+                !/^(?:401|403|5\d\d)(?:\d{3})?\b|登录|未授权|无权限|unauthori[sz]ed|unauthenticated|forbidden|denied|(?:token|session)\s+(?:has\s+)?expired/i.test(
+                    event.detail || '',
+                ),
+        )
+    )
+        return;
+    for (const event of events) event.severity = 'info';
+    for (const item of new Set([
+        check,
+        ...result.assertions.filter((a) => a.kind === 'api' && a.text === api),
+    ])) {
+        item.observedStatus = item.status;
+        item.status = '提示';
+        item.severity = 'info';
+    }
+    const unresolved = result.assertions.filter(
+        (a) => a.status !== '通过' && a.severity !== 'info',
+    );
+    result.status = unresolved.some((a) => a.status === '失败')
+        ? '失败'
+        : unresolved.length
+          ? '部分验证'
+          : '通过';
+    result.category =
+        result.status === '通过'
+            ? '无'
+            : result.status === '失败'
+              ? '断言不符合预期，需复核'
+              : '部分预期尚不能自动验证';
+    result.reason =
+        unresolved.map((a) => a.text + '：' + a.reason).join('；') ||
+        '已验证导航目标，后台读取接口的诊断已保留。';
+}
+
 // Both freshly captured events and the previous ordered workbook use this step grammar.
 // Each line belongs to exactly one scene, including unrecognized actions and checkpoints.
 function groupRecordedSteps(entries) {
@@ -528,6 +700,27 @@ export function recordedScenarios(url, entries, notices = [], authenticatedAccou
         if (authenticatedAccount || account) scene.account = authenticatedAccount || account;
         const entryUrl = workbookUrl(actions[0]?.before?.url, new URL(url).origin);
         if (entryUrl) scene.url = entryUrl;
+        const health = caseHealth(actions);
+        const hasCheckpoint = entries.some(({ step }) => step.startsWith('检查步骤预期：'));
+        let destination;
+        if (kind === 'navigate' && !hasCheckpoint) {
+            const last = actions.filter((action) => action.kind !== 'assert').at(-1);
+            const after = last?.after?.url;
+            const following = groups[i + 1]?.entries[0]?.action;
+            const next = following?.kind !== 'goto' ? following?.before?.url : null;
+            const steps = entries.map((entry) => entry.step);
+            const switched = /^切换到「|」标签页$/.test(
+                steps.filter((step) => !step.startsWith('检查步骤预期：')).at(-1) || '',
+            );
+            const observed =
+                after && (switched || (last.before?.url && after !== last.before.url))
+                    ? after
+                    : next && (switched || (last?.before?.url && next !== last.before.url))
+                      ? next
+                      : null;
+            destination = navigationDestination(steps, observed, new URL(url).origin);
+            if (destination) scene.destination = { ...destination, automaticApi: health.at(-1) };
+        }
         return {
             id,
             title: sceneNames[scene.kind],
@@ -535,11 +728,12 @@ export function recordedScenarios(url, entries, notices = [], authenticatedAccou
             data: JSON.stringify({ recordedScene: scene }),
             steps: steps.join('\n'),
             expected: [
-                ...caseHealth(actions),
+                ...health,
+                ...destinationExpectations(destination),
                 ...(saves.size ? [createExpectation] : []),
-                ...(entries.some(({ step }) => step.startsWith('检查步骤预期：'))
+                ...(hasCheckpoint
                     ? ['录制设置的步骤预期全部满足']
-                    : saves.size
+                    : saves.size || destination
                       ? []
                       : [pendingExpectation]),
             ].join('\n'),

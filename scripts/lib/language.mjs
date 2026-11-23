@@ -287,6 +287,12 @@ export function actionCriteria(spec) {
     );
 }
 export function expectation(text) {
+    const destination = text.match(/^已(到达录制页面|选中录制区域)「([^」]+)」$/);
+    if (destination)
+        return {
+            kind: destination[1] === '到达录制页面' ? 'navigation-url' : 'navigation-area',
+            target: destination[2],
+        };
     if (text === createExpectation) return { kind: 'recorded-create' };
     const health = Object.entries(HEALTH_EXPECTATIONS).find(([, phrase]) => phrase === text);
     if (health) return { kind: 'health', category: health[0] };
