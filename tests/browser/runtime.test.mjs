@@ -747,10 +747,10 @@ test(
                     chooseTarget,
                     true,
                 ),
-                /失效/,
+                /显示登录密码框.*失效.*--manual-login/,
             );
             await opened.page.evaluate(() => {
-                document.querySelector('label').firstChild.textContent = 'Enter account';
+                document.querySelector('label').firstChild.textContent = 'Tenant identity';
                 document.querySelector('button').textContent = 'Continue to Login';
             });
             let fallbacks = 0;
