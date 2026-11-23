@@ -99,9 +99,9 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
 ```
 
-1. 在打开的浏览器里完成操作。Laya 根据操作前后的页面变化生成业务断言，也可用「添加检查点」手动标记要验证的内容。
-2. 点击「完成录制」或关闭浏览器，保存 `filter.xlsx`（拆分后的用例，可直接编辑）和 `filter.spec.cjs`（Playwright 脚本）。
-3. 回放 Excel，可加 `--cases REC-001` 单独执行一条用例。
+1. 在打开的浏览器里完成操作。Laya 按顺序记录操作，可用「添加检查点」手动标记要验证的内容。
+2. 点击「完成录制」或关闭浏览器，保存 `filter.xlsx`（按业务场景编号、依次回放的用例）和 `filter.spec.cjs`（Playwright 脚本）。成功登录后会按站点和账号保存本地会话及加密凭据。下次录制或 Excel 回放先验证会话，过期时自动登录、更新 auth 并继续用例。
+3. 未识别的操作会在原位置标为「待补录」，后续步骤继续保存。需要独立用例时，录制时加 `--split-cases`。回放 Excel 可加 `--cases REC-001` 单独执行一条用例。
 
 ```bash
 laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
@@ -183,6 +183,14 @@ logs/          过程文件，排查时再看
 ```bash
 npm run demo        # 然后打开 http://127.0.0.1:8765/customers
 ```
+
+同一个服务的 `/react-demo/` 提供 React 16 + Ant Design 3 工作台，浏览器从 CDN 加载依赖。可直接从工作台首页开始录制。
+
+```bash
+laya record http://127.0.0.1:8765/react-demo/
+```
+
+点击左侧的 **Indicator Center** 图标，进入 **Realtime Indicator**，依次切换 **Edit Area → Run Area → Edit Area**。点击 **Add**，在抽屉选择模板并填写配置，点击 **Save**。在新记录的操作列悬停可查看编辑、上线及删除图标的名称。点击 **Go Online** 并确认后，可以在 **Run Area** 找到该记录。演示数据保存在当前浏览器。
 
 示例页面和用例在 [examples/](examples/)，可以用 `examples/demo-cases.xlsx` 加上述地址试跑。[介绍视频](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
 

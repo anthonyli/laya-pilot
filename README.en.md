@@ -99,9 +99,9 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
 ```
 
-1. Perform the workflow in the browser. Laya creates assertions from observed changes, and you can mark additional checks from the toolbar.
-2. Finish the recording or close the browser to save `filter.xlsx` (the split, editable cases) and `filter.spec.cjs` (the Playwright script).
-3. Replay the workbook. Use `--cases REC-001` to run a single case.
+1. Perform the workflow in the browser. Laya records your actions in order. Use the toolbar to mark a checkpoint or move the toolbar to the other edge.
+2. Finish the recording or close the browser to save `filter.xlsx` (editable cases numbered by business scenario) and `filter.spec.cjs` (the Playwright script). After a successful recorded login, the session and encrypted credentials are saved per site and account. Recording and Excel replay validate the session, sign in automatically when it expires, and save the refreshed session before continuing.
+3. Unrecognized actions are marked in place, with later steps preserved. To generate independent cases, record with `--split-cases`. When replaying, use `--cases REC-001` to run a single case.
 
 ```bash
 laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
@@ -184,6 +184,8 @@ Coverage today focuses on admin tables, filters, forms and CRUD. Complex approva
 ```bash
 npm run demo        # then open http://127.0.0.1:8765/customers
 ```
+
+The same server hosts a React 16 + Ant Design 3 workspace at `/react-demo/`. Its libraries load from a CDN. Start a recording with `laya record http://127.0.0.1:8765/react-demo/`. Open **Indicator Center → Realtime Indicator**, switch between **Edit Area** and **Run Area**, then return to **Edit Area** and select **Add**. Choose a template in the drawer, fill out the configuration, and save it. Hover over a row icon to see its action. Choose **Go Online** and confirm to see that record in **Run Area**. Data is saved in the current browser.
 
 The demo page and cases are in [examples/](examples/); try `examples/demo-cases.xlsx` with the URL above. [Intro video](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
 
