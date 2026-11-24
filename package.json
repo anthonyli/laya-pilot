@@ -1,6 +1,6 @@
 {
     "name": "laya-pilot",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "private": false,
     "description": "Run browser regression tests from existing Excel cases for enterprise admin applications",
     "license": "MIT",
