@@ -1,6 +1,7 @@
 import { isAreaSwitch, lines, recordedReviewPrefix } from './language.mjs';
 import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
 import { createExpectation } from './recorded-create.mjs';
+import { editorStep } from './recorded-editor.mjs';
 
 const pendingExpectation = '业务结果待补充（录制时未设置预期）';
 const optionalApiExpectation = '未观察到接口请求失败';
@@ -91,16 +92,24 @@ function fieldExpectation(header, key, field, value) {
 function manualExpectation(action, replacements) {
     const { name, role } = action.target ?? {};
     if (!workbookText(name)) return null;
-    if (action.assertion === 'visible')
-        return `页面显示「${replacements?.get(name) ?? name}」${role === 'button' ? '按钮' : ''}`;
+    if (action.assertion === 'visible') {
+        const value = action.target.parameter
+            ? '${' + action.target.parameter + '}'
+            : (replacements?.get(name) ?? name);
+        const scope = action.target.scope === '弹窗' ? '弹窗' : '页面';
+        return `${scope}显示「${value}」${role === 'button' ? '按钮' : ''}`;
+    }
     if (action.assertion === 'value' && role === 'textbox' && workbookText(action.value, true)) {
-        const value = replacements?.get(action.value) ?? action.value;
+        const value = action.parameter
+            ? '${' + action.parameter + '}'
+            : (replacements?.get(action.value) ?? action.value);
         return value ? `「${name}」输入框的值为「${value}」` : `「${name}」输入框为空`;
     }
     return null;
 }
 
 function actionStep(action, row, values, replacements) {
+    if (action.kind === 'editor') return [editorStep(action.operation)];
     const { name, role } = action.target ?? {};
     if (action.kind === 'goto') return workbookUrl(action.url) ? [`打开网址 ${action.url}`] : null;
     if (action.kind === 'assert') {
@@ -123,9 +132,37 @@ function actionStep(action, row, values, replacements) {
         return [`按下 ${action.key}（${label}精确匹配「${name}」）`];
     }
     if (!workbookText(name) || action.target.rowAmbiguous) return null;
+    const steps = [];
+    if (
+        action.target.row &&
+        (action.kind === 'click' || action.target.locator === 'selectSearch')
+    ) {
+        const header = action.target.rowHeader ?? list(action.before)?.header;
+        if (!workbookText(header) || !workbookText(action.target.row)) return null;
+        const matchesFixture = row?.header === header && row?.original === action.target.row;
+        if (row && !matchesFixture && writeControl.test(name)) return null;
+        const key = matchesFixture
+            ? row.fixture
+            : action.target.rowParameter
+              ? '${' + action.target.rowParameter + '}'
+              : action.target.row;
+        steps.push(`在「${header}」列中定位值为「${key}」的唯一记录`);
+    }
     if (action.kind === 'fill' && workbookText(action.value, true)) {
-        const value = typeof values?.get(action) === 'string' ? values.get(action) : action.value;
+        const value = action.parameter
+            ? '${' + action.parameter + '}'
+            : typeof values?.get(action) === 'string'
+              ? values.get(action)
+              : action.value;
         const scope = action.target.scope === '弹窗' ? '弹窗的' : '';
+        if (action.target.locator === 'selectSearch') {
+            return [
+                ...steps,
+                value
+                    ? `在${scope}「${name}」下拉框中搜索「${value}」`
+                    : `清空${scope}「${name}」下拉框的搜索内容`,
+            ];
+        }
         if (action.target.locator === 'formNumber')
             return [`在${scope}「${name}」字段中输入数值「${value}」`];
         return [
@@ -139,6 +176,11 @@ function actionStep(action, row, values, replacements) {
     if (action.kind === 'check' || action.kind === 'uncheck')
         return [`${action.kind === 'check' ? '勾选' : '取消勾选'}「${name}」复选框`];
     if (action.kind !== 'click') return null;
+    if (action.target.locator === 'labelledButton')
+        return [
+            ...steps,
+            `${action.target.scope === '弹窗' ? '在弹窗中' : ''}点击标签为「${name}」的按钮`,
+        ];
     if (action.target.locator === 'cardTitle') return [`在弹窗中点击标题为「${name}」的卡片`];
     if (action.target.locator === 'namedNavIcon') return [`展开「${name}」导航菜单`];
     if (action.target.locator === 'navIcon')
@@ -146,15 +188,6 @@ function actionStep(action, row, values, replacements) {
             ? [`展开导航图标「${name}」以显示「${action.target.childLink}」链接`]
             : null;
     if (isAreaSwitch(action.target)) return [`切换到「${name}」区域`];
-    const steps = [];
-    if (action.target.row) {
-        const header = action.target.rowHeader ?? list(action.before)?.header;
-        if (!workbookText(header) || !workbookText(action.target.row)) return null;
-        const matchesFixture = row?.header === header && row?.original === action.target.row;
-        if (row && !matchesFixture && writeControl.test(name)) return null;
-        const key = matchesFixture ? row.fixture : action.target.row;
-        steps.push(`在「${header}」列中定位值为「${key}」的唯一记录`);
-    }
     if (action.target.locator === 'fieldSelect') {
         const scope = action.target.scope === '弹窗' ? '在弹窗中' : '';
         return [...steps, `${scope}点击「${name}」字段的下拉框`];
@@ -422,12 +455,18 @@ const sceneNames = {
     custom: '录制流程',
 };
 
+function recordedButtonName(step) {
+    return (
+        step.match(/^(?:在弹窗中)?点击「([^」]+)」按钮$/)?.[1] ||
+        step.match(/^(?:在弹窗中)?点击标签为「([^」]+)」的按钮$/)?.[1]
+    );
+}
+
 function sceneTrigger(step) {
     if (step.startsWith('展开导航图标「') || /^展开「.+」导航菜单$/.test(step)) return 'navigate';
     if (/^切换到「.+」区域$|^点击「.+」(?:链接|标签页|菜单项)$/.test(step)) return 'navigate';
     const button =
-        step.match(/^(?:在弹窗中)?点击「(.+)」按钮$/)?.[1] ||
-        step.match(/^(?:在弹窗中)?点击操作图标「(.+)」$/)?.[1];
+        recordedButtonName(step) || step.match(/^(?:在弹窗中)?点击操作图标「(.+)」$/)?.[1];
     if (!button) return null;
     if (/^(?:登\s*录|login|log in|sign in)$/i.test(button)) return 'login';
     if (searchControl.test(button)) return 'search';
@@ -632,7 +671,7 @@ function groupRecordedSteps(entries) {
         }
         current.kind ||= trigger;
         current.entries.push(entry);
-        const button = entry.step.match(/^(?:在弹窗中)?点击「(.+)」按钮$/)?.[1];
+        const button = recordedButtonName(entry.step);
         if (button && (closeControl.test(button) || commitControl.test(button))) closed = true;
     }
     return groups;
@@ -646,7 +685,7 @@ function createSaveEntries(group) {
         const trigger = sceneTrigger(entry.step);
         if (trigger === 'create') creating = true;
         if (trigger === 'edit' || trigger === 'delete') creating = false;
-        const name = entry.step.match(/^(?:在弹窗中)?点击「([^」]+)」按钮$/)?.[1];
+        const name = recordedButtonName(entry.step);
         if (name && closeControl.test(name)) creating = false;
         if (creating && /^(?:save|submit|保存|提交|保存并关闭)$/i.test(name || ''))
             saves.add(entry);
@@ -671,7 +710,103 @@ export function recordedCreateActions(actions) {
     );
 }
 
-export function recordedScenarios(url, entries, notices = [], authenticatedAccount) {
+// Bind only references that identify the same field, exact row or visible checkpoint.
+function recordedFieldBindings(actions, fill, parameter) {
+    const { target: field, value } = fill;
+    if (
+        fill.parameter ||
+        !workbookText(value) ||
+        field.row ||
+        field.pattern ||
+        (field.inputType && !['text', 'textarea'].includes(field.inputType)) ||
+        (field.maxLength > 0 && value.length + 11 > field.maxLength)
+    )
+        return null;
+    const bindings = new Map([[fill, { ...fill, parameter }]]);
+    const sharedValue = actions.some((a) => a !== fill && a.kind === 'fill' && a.value === value);
+    for (const later of actions.slice(actions.indexOf(fill) + 1)) {
+        const target = later.target;
+        if (later.kind === 'editor' && later.operation.value?.includes(value)) return null;
+        if (target?.row === value) {
+            if (target.rowAmbiguous || target.rowHeader !== field.name || later.kind !== 'click')
+                return null;
+            bindings.set(later, { ...later, target: { ...target, rowParameter: parameter } });
+        } else if (target?.name === value) {
+            if (
+                sharedValue ||
+                later.kind !== 'assert' ||
+                later.assertion !== 'visible' ||
+                target.role !== 'text'
+            )
+                return null;
+            bindings.set(later, { ...later, target: { ...target, parameter } });
+        } else if (later.value === value) {
+            if (later.kind === 'fill' && /^(description|描述|备注)$/i.test(target?.name || ''))
+                continue;
+            if (
+                later.kind !== 'assert' ||
+                later.assertion !== 'value' ||
+                target?.name !== field.name
+            )
+                return null;
+            bindings.set(later, { ...later, parameter });
+        }
+    }
+    return bindings;
+}
+
+export function parameterizeRecordedFields(recording) {
+    const entries = recording.actions.flatMap((action) =>
+        orderedSteps([action]).map((step) => ({ action, step })),
+    );
+    const parameters = { ...recording.parameters };
+    const replacements = new Map();
+    const fields = {
+        recordName: /(?:^name$|\bname$|名称$)/i,
+        recordDescription: /^(description|描述|备注)$/i,
+    };
+    for (const [index, group] of groupRecordedSteps(entries).entries()) {
+        if (
+            group.kind !== 'create' ||
+            !group.entries.some(({ step }) =>
+                /^(?:save|submit|保存|提交|保存并关闭)$/i.test(recordedButtonName(step) || ''),
+            )
+        )
+            continue;
+        const fills = group.entries
+            .map((entry) => entry.action)
+            .filter(
+                (a) =>
+                    a.kind === 'fill' &&
+                    a.target?.role === 'textbox' &&
+                    !/user.?name|account|用户|登录/i.test(a.target.name),
+            );
+        for (const [prefix, pattern] of Object.entries(fields)) {
+            const matches = fills.filter((a) => pattern.test(a.target.name));
+            const parameter = prefix + (index + 1);
+            if (matches.length !== 1 || Object.hasOwn(parameters, parameter)) continue;
+            const [fill] = matches;
+            const bindings = recordedFieldBindings(recording.actions, fill, parameter);
+            if (!bindings || [...bindings.keys()].some((action) => replacements.has(action)))
+                continue;
+            parameters[parameter] = fill.value + '${runKey}';
+            for (const [action, bound] of bindings) replacements.set(action, bound);
+        }
+    }
+    return {
+        ...recording,
+        parameters,
+        actions: recording.actions.map((a) => replacements.get(a) || a),
+    };
+}
+
+export function recordedScenarios(
+    url,
+    entries,
+    notices = [],
+    authenticatedAccount,
+    parameters = {},
+) {
     const groups = groupRecordedSteps(entries);
     const login = groups.find((group) => group.kind === 'login');
     const account = login?.entries
@@ -725,7 +860,7 @@ export function recordedScenarios(url, entries, notices = [], authenticatedAccou
             id,
             title: sceneNames[scene.kind],
             preconditions: write ? writePrecondition : '',
-            data: JSON.stringify({ recordedScene: scene }),
+            data: JSON.stringify({ ...parameters, recordedScene: scene }),
             steps: steps.join('\n'),
             expected: [
                 ...health,
@@ -753,6 +888,7 @@ export function generateRecordedCases(recording, { splitCases = false } = {}) {
         recording.url ?? recording.actions.find((a) => a.kind === 'goto')?.url,
     );
     if (!initial) throw Error('录制缺少可回放的页面入口。');
+    const visits = recording.pages?.length ? { pages: recording.pages } : {};
     if (!splitCases) {
         const actions = recording.actions;
         if (!actions.some((action) => action.kind !== 'goto'))
@@ -761,7 +897,16 @@ export function generateRecordedCases(recording, { splitCases = false } = {}) {
             orderedSteps([action]).map((step) => ({ action, step })),
         );
         if (actions[0]?.kind !== 'goto') entries.unshift({ step: `打开网址 ${initial}` });
-        return recordedScenarios(initial, entries, recording.skipped, recording.account);
+        return {
+            ...recordedScenarios(
+                initial,
+                entries,
+                recording.skipped,
+                recording.account,
+                recording.parameters,
+            ),
+            ...visits,
+        };
     }
     const origin = new URL(initial).origin;
     const cases = [];
@@ -1016,5 +1161,5 @@ export function generateRecordedCases(recording, { splitCases = false } = {}) {
     }
     if (!cases.length) throw Error('录制中没有可转换的用户操作。');
     const requiresWrite = cases.some((item) => item.preconditions === writePrecondition);
-    return { url: initial, cases, skipped, requiresWrite };
+    return { url: initial, cases, skipped, requiresWrite, ...visits };
 }

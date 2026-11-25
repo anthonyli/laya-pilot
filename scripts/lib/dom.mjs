@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Halt, norm } from './language.mjs';
 import { controlBindingsFor } from './control-bindings.mjs';
+import { selectSearchInput } from './recorded-select.mjs';
 const ATTR = 'data-laya-live-ref';
 export async function observe(page) {
     const nonce = randomBytes(5).toString('hex'),
@@ -48,7 +49,7 @@ export async function observe(page) {
         if (!available) continue;
         const items = await frames[fi]
             .evaluate(
-                ({ nonce, fi, attr, bindings }) => {
+                ({ nonce, fi, attr, bindings, selectSearchInput }) => {
                     const visible = (e) => {
                         const s = getComputedStyle(e),
                             r = e.getBoundingClientRect();
@@ -364,6 +365,7 @@ export async function observe(page) {
                                         'a[disabled],button[disabled],a.disabled,button.disabled',
                                     )),
                             readonly: e.readOnly === true,
+                            ...(e.matches(selectSearchInput) && { editableCombobox: true }),
                             selected:
                                 e.getAttribute('aria-selected') === 'true' ||
                                 e.classList.contains('ant-menu-item-selected') ||
@@ -383,6 +385,7 @@ export async function observe(page) {
                     nonce,
                     fi,
                     attr: ATTR,
+                    selectSearchInput,
                     bindings:
                         fi === 0
                             ? controlBindingsFor(page).filter((b) => b.url === page.url())
@@ -507,7 +510,10 @@ export async function target(
     if (rowKey) candidates = candidates.filter((c) => c.rowKey === rowKey);
     if (['fill', 'clear', 'value', 'empty'].includes(kind))
         candidates = candidates.filter(
-            (c) => ['textbox', 'spinbutton'].includes(c.role) && !c.readonly,
+            (c) =>
+                !c.readonly &&
+                (['textbox', 'spinbutton'].includes(c.role) ||
+                    (['fill', 'clear'].includes(kind) && c.editableCombobox && c.name === intent)),
         );
     if (kind === 'select')
         candidates = candidates.filter((c) => c.role === 'combobox' || c.tag === 'select');

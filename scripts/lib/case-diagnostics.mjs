@@ -3,6 +3,7 @@ import {
     expectation,
     lines,
     parseData,
+    replayData,
     quoted,
     recordedReviewPrefix,
 } from './language.mjs';
@@ -58,6 +59,13 @@ export function stepDiagnostic(text) {
             suggestion: '将此行替换为实际操作后再回放。',
         };
     const spec = describe(text);
+    if (text.startsWith('编辑器操作 ') && spec.verb !== 'editor')
+        return {
+            code: 'invalid-editor-operation',
+            status: 'needs-review',
+            message: '编辑器操作参数无效',
+            suggestion: '检查操作类型和 JSON 格式。',
+        };
     const expanded = expandStep(text);
     if (
         expanded.length &&
@@ -101,7 +109,7 @@ export function inspectCase(c, overrides = {}, runId) {
     const diagnostics = [];
     let data = {};
     try {
-        data = { ...parseData(c.data), ...overrides };
+        data = replayData(parseData(c.data), overrides, runId);
     } catch {
         diagnostics.push({
             ...location,
@@ -113,9 +121,8 @@ export function inspectCase(c, overrides = {}, runId) {
             suggestion: '修正测试数据表达形式，保留其业务取值。',
         });
     }
-    if (runId !== undefined) data.runId = runId;
     const resolve = (text, field, index) => {
-        if (text.includes('${runId}') && !Object.hasOwn(data, 'runId'))
+        if (/\$\{(?:runId|runKey)\}/.test(text) && !runId)
             diagnostics.push({
                 ...location,
                 field,
@@ -123,14 +130,16 @@ export function inspectCase(c, overrides = {}, runId) {
                 text,
                 code: 'runtime-variable',
                 status: 'needs-run',
-                message: 'runId 在运行时确定，当前仅检查表达形式',
+                message: '运行标识在回放时确定，当前仅检查表达形式',
                 suggestion: '执行后从本轮结果核对实际值，不把预检算作通过。',
             });
         const missing = [
             ...new Set(
                 [...text.matchAll(/\$\{([^}]+)\}/g)]
                     .map((m) => m[1])
-                    .filter((key) => key !== 'runId' && !Object.hasOwn(data, key)),
+                    .filter(
+                        (key) => !['runId', 'runKey'].includes(key) && !Object.hasOwn(data, key),
+                    ),
             ),
         ];
         if (missing.length)

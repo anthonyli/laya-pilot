@@ -13,6 +13,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { resolveUiAdapters, validateUiAdapterSelectors } from './ui-adapters.mjs';
 import { selectOptionName } from './ui-adapter-select.mjs';
+import { editorPoint, editorKeys, treeNodePath } from './recorded-editor.mjs';
 import { formItemLabel, onlyExpandedSelect, selectSelectors } from './recorded-select.mjs';
 import {
     navigationScope,
@@ -32,10 +33,12 @@ function recordableUrl(value, origin) {
     try {
         const url = new URL(value);
         if (url.origin !== origin || url.username || url.password) return '';
-        if ([...url.searchParams.keys()].some((key) => sensitive.test(key))) return '';
+        const hashQuery = url.hash.slice(1).split('?').at(-1);
+        const keys = [...url.searchParams.keys(), ...new URLSearchParams(hashQuery).keys()];
+        if (keys.some((key) => sensitive.test(key) || /credential/i.test(key))) return '';
         if (
-            /auth|callback|signin|sso/i.test(url.pathname) &&
-            (url.searchParams.has('code') || url.searchParams.has('state'))
+            /auth|callback|signin|sso/i.test(url.pathname + url.hash.split('?')[0]) &&
+            keys.some((key) => /^(code|state)$/i.test(key))
         )
             return '';
         if (sensitive.test(url.hash.split('?')[1] || '')) return '';
@@ -65,6 +68,9 @@ function installRecorder(
     formItemLabel,
     onlyExpandedSelect,
     selectOptionName,
+    editorPoint,
+    editorKeys,
+    treeNodePath,
 ) {
     if (location.origin !== origin) return;
     const actionControls =
@@ -197,6 +203,10 @@ function installRecorder(
                 element.getAttribute('aria-label'),
         );
         const placeholder = text(element.getAttribute('placeholder'));
+        if (element.matches(selectMarkup.searchInput)) {
+            const name = label || formItemLabel(element, selectMarkup) || placeholder;
+            if (name) return { role, name, locator: 'selectSearch' };
+        }
         if (
             element.matches('input[type=number],input[role=spinbutton]') &&
             !element.closest(tableSelector)
@@ -223,6 +233,15 @@ function installRecorder(
             text(element.getAttribute('title')) ||
             (tag === 'input' && role === 'button' ? text(element.value) : '');
         if (!role || !name) return null;
+        if (
+            role === 'button' &&
+            element.getAttribute('aria-label') === name &&
+            visibleElements(
+                element.closest(dialogSelector) || document,
+                'button,[role=button]',
+            ).some((peer) => peer !== element && visibleText(peer) === name)
+        )
+            return { role, name, locator: 'labelledButton' };
         if (
             role === 'button' &&
             !label &&
@@ -685,6 +704,97 @@ function installRecorder(
     let lastEnter = -1000;
     // One placeholder per field edit; even the password length must stay private.
     const redactedInputs = new WeakSet();
+    const editorInput = (el) =>
+        el?.matches?.('.monaco-editor textarea.inputarea') && !privateField(el, identify(el));
+    function editorAction(operation, root) {
+        if (operation.type === 'text' && operation.value.length > 4096)
+            emit({ kind: 'unsupported', reason: '编辑器输入超出可录制长度。' });
+        else if (
+            root &&
+            (visibleElements(document, '.monaco-editor').length !== 1 || !visible(root))
+        )
+            emit({ kind: 'unsupported', reason: '无法唯一定位可见的 Monaco 编辑器。' });
+        else emit({ kind: 'editor', operation });
+    }
+    let anchor, pressedEditorKey, handledEditorClick;
+    addEventListener(
+        'mousedown',
+        (e) => {
+            anchor = null;
+            handledEditorClick = false;
+            if (!e.isTrusted || e.button !== 0 || mark?.getAttribute('aria-pressed') === 'true')
+                return;
+            const el = e.composedPath()[0];
+            const root = el.closest?.('.monaco-editor');
+            if (!root || !editorInput(root.querySelector('textarea.inputarea'))) return;
+            const suggestion = el.closest(
+                '.suggest-widget .monaco-list-row,.suggest-widget [role=option]',
+            );
+            if (suggestion) {
+                const name = suggestion.querySelector('.label-name')?.textContent?.trim();
+                if (name) editorAction({ type: 'suggest', name }, root);
+                else emit({ kind: 'unsupported', reason: '编辑器候选项缺少名称。' });
+                handledEditorClick = true;
+                return;
+            }
+            if (
+                el.closest('.overlayWidgets,.contentWidgets') ||
+                !el.closest('.lines-content,.view-lines')
+            )
+                return;
+            const from = editorPoint(root, { x: e.clientX, y: e.clientY });
+            if (from) anchor = { root, from };
+        },
+        true,
+    );
+    addEventListener(
+        'mouseup',
+        (e) => {
+            if (!anchor || !e.isTrusted) return;
+            const { root, from } = anchor;
+            anchor = null;
+            handledEditorClick = true;
+            const end = editorPoint(root, { x: e.clientX, y: e.clientY });
+            if (!end) {
+                emit({ kind: 'unsupported', reason: '编辑器选择终点无法定位。' });
+                return;
+            }
+            const moved = from.line !== end.line || from.column !== end.column;
+            editorAction({ type: 'cursor', from, ...(moved && { to: end }) }, root);
+        },
+        true,
+    );
+    addEventListener(
+        'keyup',
+        () => {
+            pressedEditorKey = null;
+        },
+        true,
+    );
+    addEventListener(
+        'paste',
+        (e) => {
+            if (!e.isTrusted || !editorInput(e.target)) return;
+            const value = e.clipboardData?.getData('text/plain');
+            if (value)
+                editorAction(
+                    { type: 'text', value, input: 'insert' },
+                    e.target.closest('.monaco-editor'),
+                );
+        },
+        true,
+    );
+    addEventListener(
+        'compositionend',
+        (e) => {
+            if (e.isTrusted && editorInput(e.target) && e.data)
+                editorAction(
+                    { type: 'text', value: e.data, input: 'insert' },
+                    e.target.closest('.monaco-editor'),
+                );
+        },
+        true,
+    );
     addEventListener('focusout', (event) => redactedInputs.delete(event.composedPath()[0]), true);
     addEventListener(
         'click',
@@ -729,6 +839,49 @@ function installRecorder(
                 )
             )
                 noteLogin(element || path[0], true, element);
+            const treeNode = path[0].closest('[role=treeitem]');
+            const treePart = path[0].closest('.ant-tree-switcher,.ant-tree-node-content-wrapper');
+            if (
+                treeNode &&
+                treePart &&
+                treePart.closest('[role=treeitem]') === treeNode &&
+                !treeNode.closest(selectMarkup.popup) &&
+                visibleElements(document, '.monaco-editor').length
+            ) {
+                const nodePath = treeNodePath(treeNode);
+                if (nodePath && treeNode.closest('[role=tree]')) {
+                    const toggle = treePart.matches(
+                        '.ant-tree-switcher:not(.ant-tree-switcher-noop)',
+                    );
+                    editorAction({
+                        type: 'tree',
+                        path: nodePath,
+                        part: toggle ? 'toggle' : 'title',
+                        ...(toggle && {
+                            expanded: !(
+                                treeNode.getAttribute('aria-expanded') === 'true' ||
+                                treeNode.classList.contains('ant-tree-treenode-switcher-open')
+                            ),
+                        }),
+                    });
+                    return;
+                }
+            }
+            const editor = path[0].closest('.monaco-editor');
+            if (editor) {
+                if (handledEditorClick) return;
+                if (!editorInput(editor.querySelector('textarea.inputarea'))) {
+                    emit({ kind: 'unsupported', reason: '编辑器输入不可录制。' });
+                    return;
+                }
+                const suggestion = path[0].closest(
+                    '.suggest-widget .monaco-list-row,.suggest-widget [role=option]',
+                );
+                const name = suggestion?.querySelector('.label-name')?.textContent?.trim();
+                if (name) editorAction({ type: 'suggest', name }, editor);
+                else emit({ kind: 'unsupported', reason: '编辑器控件没有可回放的位置或名称。' });
+                return;
+            }
             if (recordSelectClick(path[0])) return;
             const controlName = element && identify(element)?.name;
             const icon =
@@ -774,6 +927,19 @@ function installRecorder(
         'beforeinput',
         (event) => {
             const element = event.composedPath()[0];
+            if (event.isTrusted && editorInput(element)) {
+                if (
+                    !event.isComposing &&
+                    !pressedEditorKey &&
+                    event.data &&
+                    event.inputType === 'insertText'
+                )
+                    editorAction(
+                        { type: 'text', value: event.data, input: 'insert' },
+                        element.closest('.monaco-editor'),
+                    );
+                return;
+            }
             if (
                 event.isTrusted &&
                 element instanceof Element &&
@@ -808,6 +974,7 @@ function installRecorder(
                 });
                 return;
             }
+            if (editorInput(element)) return;
             const before = beforeInput.get(element);
             beforeInput.delete(element);
             entered.add(element);
@@ -854,6 +1021,38 @@ function installRecorder(
     addEventListener(
         'keydown',
         (event) => {
+            if (event.isTrusted && editorInput(event.target)) {
+                if (event.isComposing) return;
+                const root = event.target.closest('.monaco-editor');
+                const { key } = event;
+                if (!event.ctrlKey && !event.metaKey && !event.altKey && key.length === 1) {
+                    pressedEditorKey = key;
+                    editorAction({ type: 'text', value: key }, root);
+                } else {
+                    const code =
+                        (event.ctrlKey || event.metaKey ? 'ControlOrMeta+' : '') +
+                        (event.shiftKey ? 'Shift+' : '') +
+                        (key.length === 1 ? key.toLowerCase() : key);
+                    if (!event.altKey && editorKeys.includes(code))
+                        editorAction({ type: 'key', key: code }, root);
+                    else if (
+                        ![
+                            'Shift',
+                            'Control',
+                            'Meta',
+                            'Alt',
+                            'AltGraph',
+                            'CapsLock',
+                            'Process',
+                            'Dead',
+                            'Unidentified',
+                        ].includes(key) &&
+                        !['ControlOrMeta+c', 'ControlOrMeta+v'].includes(code)
+                    )
+                        emit({ kind: 'unsupported', reason: '编辑器快捷键需要补录。' });
+                }
+                return;
+            }
             if (!event.isTrusted || event.altKey || event.metaKey || event.ctrlKey) return;
             if (!['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp'].includes(event.key)) return;
             const element = event.composedPath()[0];
@@ -1115,9 +1314,35 @@ export async function captureRecording({
                 if (Date.now() - request.at <= 60) requests.push(request.state);
             }
             const previous = actions.at(-1);
+            if (
+                action.kind === 'editor' &&
+                previous?.kind === 'editor' &&
+                action.operation.type === 'text' &&
+                previous.operation.type === 'text' &&
+                !action.operation.input &&
+                !previous.operation.input &&
+                activeAt - previousAt < 700 &&
+                previous.before?.url === action.before?.url &&
+                action.operation.value.length + previous.operation.value.length <= 4096
+            ) {
+                active.operation = {
+                    ...action.operation,
+                    value: previous.operation.value + action.operation.value,
+                };
+                active.before = previous.before;
+                active.requests = [...previous.requests, ...requests].slice(-16);
+                actions[actions.length - 1] = active;
+                job = readSettledState(active);
+                return;
+            }
             const sameFill =
                 action.kind === 'fill' &&
                 previous?.kind === 'fill' &&
+                // Clearing a search restores the option list, even when it follows typing immediately.
+                !(
+                    action.target?.locator === 'selectSearch' &&
+                    (!action.value || !previous.value)
+                ) &&
                 activeAt - previousAt < 700 &&
                 previous.before?.url === action.before?.url &&
                 JSON.stringify(previous.target) === JSON.stringify(action.target);
@@ -1238,6 +1463,7 @@ export async function captureRecording({
                     'select',
                     'assert',
                     'unsupported',
+                    'editor',
                 ].includes(event.kind)
             )
                 return;
@@ -1261,7 +1487,13 @@ export async function captureRecording({
             selectMarkup: selectSelectors(ui),
         };
         await context.addInitScript({
-            content: `(${installRecorder})(${JSON.stringify(recorderOptions)}, ${iconOwner}, ${declaredIconName}, ${formItemLabel}, ${onlyExpandedSelect}, ${selectOptionName})`,
+            content: `(${installRecorder})(${JSON.stringify(recorderOptions)}, ${iconOwner}, ${declaredIconName}, ${formItemLabel}, ${onlyExpandedSelect}, ${selectOptionName}, ${editorPoint}, ${JSON.stringify(editorKeys)}, ${treeNodePath})`,
+        });
+        const pages = [];
+        page.on('framenavigated', (frame) => {
+            if (ending || frame !== page.mainFrame()) return;
+            const visited = recordableUrl(frame.url(), origin);
+            if (visited && visited !== pages.at(-1)) pages.push(visited);
         });
         await page.goto(entryUrl, { waitUntil: 'domcontentloaded' });
         const initial = await readState();
@@ -1334,6 +1566,7 @@ export async function captureRecording({
         return {
             url: entryUrl,
             actions,
+            pages,
             ...(account && { account }),
             ...(uiAdapters.length && { uiAdapters }),
         };

@@ -80,6 +80,101 @@ test('record and replay a composite field and its virtual portaled option beside
     assert.equal(await page.locator('body').getAttribute('data-value'), 'right');
 });
 
+test('records and replays typing, clearing and selecting a titled virtual tree node', async (t) => {
+    const url = await servePage(
+        t,
+        `
+        <style>#channel,.tntd-virtual-tree-select-dropdown{position:absolute;left:8px;top:50px;width:240px;height:40px}
+        .tntd-virtual-tree-select-dropdown{background:white;z-index:1}</style>
+        <div class="ant-form-item"><div class="ant-form-item-label"><label for="org">Organization</label></div>
+          <div class="tntd-rc-select"><div class="tntd-rc-select-selector">
+            <input type="search" role="combobox" id="org" aria-expanded="false" aria-controls="unmounted">
+          </div></div></div>
+        <div class="tntd-virtual-tree-select-dropdown" hidden><div class="tntd-virtual-tree-item">
+          <button aria-label="Expand"></button><div class="tntd-virtual-tree-title"><div>TongDun</div></div>
+        </div></div>
+        <button id="channel" role="combobox" aria-label="Channel" onclick="document.body.dataset.channel='open'">Choose</button>
+        <button>TongDun</button>
+        <script>
+          const field = document.querySelector('#org'), popup = document.querySelector('.tntd-virtual-tree-select-dropdown');
+          field.closest('.tntd-rc-select-selector').onclick = () => { field.focus(); popup.hidden = false; field.setAttribute('aria-expanded', 'true'); };
+          popup.onmousedown = e => e.preventDefault();
+          field.onblur = () => { popup.hidden = true; field.setAttribute('aria-expanded', 'false'); };
+          field.oninput = () => {
+            document.body.dataset.query = (document.body.dataset.query || '') + '[' + field.value + ']';
+            popup.firstElementChild.hidden = !!field.value;
+          };
+          popup.querySelector('.tntd-virtual-tree-title').onclick = () => {
+            document.body.dataset.selected = 'TongDun';
+          };
+        </script>`,
+    );
+    const recording = await captureRecording({
+        url,
+        playwright: { chromium },
+        headless: true,
+        async onReady(page) {
+            const search = page.getByRole('combobox', { name: 'Organization', exact: true });
+            await search.click();
+            await search.pressSequentially('xx');
+            await search.fill('');
+            await page.locator('.tntd-virtual-tree-title div').click();
+            const channel = page.getByRole('combobox', { name: 'Channel' });
+            await channel.focus();
+            await channel.click();
+            await page.getByRole('button', { name: '完成录制' }).click();
+        },
+    });
+    const steps = generateRecordedCases(recording).cases.flatMap((entry) => lines(entry.steps));
+    assert.deepEqual(steps.slice(1), [
+        '点击「Organization」字段的下拉框',
+        '在「Organization」下拉框中搜索「xx」',
+        '清空「Organization」下拉框的搜索内容',
+        '在「Organization」字段下拉框中点击「TongDun」选项',
+        '点击「Channel」字段的下拉框',
+    ]);
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    page.setDefaultTimeout(2500);
+    const engine = new Engine(page, null, {
+        url,
+        origins: [new URL(url).origin],
+        delay: 0,
+        assertTimeout: 500,
+    });
+    for (const step of steps) await engine.step(step);
+    const check = async () => {
+        assert.equal(await page.locator('body').getAttribute('data-query'), '[xx][]');
+        assert.equal(await page.locator('body').getAttribute('data-selected'), 'TongDun');
+        assert.equal(await page.locator('body').getAttribute('data-channel'), 'open');
+    };
+    await check();
+    let run;
+    new Function('require', renderRecordingSpec(recording))(() => ({
+        test: (_title, fn) => {
+            run = fn;
+        },
+    }));
+    await run({ page });
+    await check();
+
+    // Workbooks recorded before combobox searches had their own step wording.
+    engine.laya = {
+        choose: async (_state, choices) => {
+            assert.ok(Object.hasOwn(choices, 'Organization'));
+            return { choice: 'Organization', probabilities: { Organization: 1 }, margin: 1 };
+        },
+    };
+    await page.goto(url);
+    await engine.step(steps[1]);
+    await engine.step('在「Organization」输入框中输入「xx」');
+    await engine.step('清空「Organization」输入框');
+    await engine.step(steps[4]);
+    await engine.step(steps[5]);
+    await check();
+});
+
 test('matches the open Cascader with an unmounted aria-controls target, refusing duplicate choices across columns', async (t) => {
     const html = `<div role="dialog"><div class="ant-form-item"><div class="ant-form-item-label"><label>Category</label></div>
       <div class="tntd-rc-select"><div class="tntd-rc-select-selector" tabindex="0" role="combobox" aria-expanded="false" aria-controls="catalogPath_list"

@@ -1,10 +1,18 @@
-import { recordedReviewPrefix } from './language.mjs';
+import { recordedReviewPrefix, replayData } from './language.mjs';
+import {
+    replayEditorOperation,
+    editorPoint,
+    editorKeys,
+    treeNodePath,
+} from './recorded-editor.mjs';
 import { resolveUiAdapters } from './ui-adapters.mjs';
 import { selectOptionName, selectOptionChoices } from './ui-adapter-select.mjs';
 import { businessResponseFailed } from './diagnostics.mjs';
 import {
+    clickRecordedSelectTrigger,
     recordedFormItem,
     recordedSelectOption,
+    recordedSelectSearch,
     recordedSelectTrigger,
     onlyExpandedSelect,
     selectSelectors,
@@ -32,17 +40,25 @@ const actionMethods = {
 function recordedLocator(target, ui) {
     if (!target?.name) return null;
     const exact = '{ exact: true }';
-    const name = JSON.stringify(target.name);
+    const name = target.parameter
+        ? `data[${JSON.stringify(target.parameter)}]`
+        : JSON.stringify(target.name);
     let scope = 'page';
     if (target.row && !target.rowAmbiguous) {
-        const cell = JSON.stringify(target.row);
+        const cell = target.rowParameter
+            ? `data[${JSON.stringify(target.rowParameter)}]`
+            : JSON.stringify(target.row);
         scope += `.getByRole('row').filter({ has: page.getByText(${cell}, ${exact}) })`;
     } else if (target.scope === 'dialog' || target.scope === '弹窗') {
         scope += `.locator(${JSON.stringify(ui.dialog)}).filter({ visible: true })`;
     }
     if (target.rowAmbiguous) return null;
+    if (target.locator === 'labelledButton')
+        return `${scope}.getByRole('button', { name: ${name}, exact: true }).and(${scope}.getByLabel(${name}, ${exact}))`;
     if (target.locator === 'fieldSelect')
         return `recordedSelectTrigger(${scope}, page, ${name}, selectMarkup)`;
+    if (target.locator === 'selectSearch')
+        return `recordedSelectSearch(${scope}, page, ${name}, selectMarkup)`;
     if (target.locator === 'selectOption') {
         const opener = target.field ? recordedLocator(target.field, ui) : 'null';
         return `(await recordedSelectOption(page, ${name}, ${opener}, selectMarkup, ${scope}))`;
@@ -72,10 +88,19 @@ export function renderRecordingSpec(recording, channel) {
     const ui = resolveUiAdapters(recording.uiAdapters);
     const selectMarkup = selectSelectors(ui);
     const statements = ["const { test, expect } = require('playwright/test');"];
+    const parameterized = Object.keys(recording.parameters || {}).length > 0;
+    if (parameterized) statements.push(replayData.toString());
+    if (recording.actions.some((a) => a.kind === 'editor'))
+        statements.push(
+            editorPoint.toString(),
+            treeNodePath.toString(),
+            `const editorKeys = ${JSON.stringify(editorKeys)};`,
+            replayEditorOperation.toString(),
+        );
     if (
         recording.actions.some(
             (action) =>
-                ['formNumber', 'fieldSelect'].includes(action.target?.locator) ||
+                ['formNumber', 'fieldSelect', 'selectSearch'].includes(action.target?.locator) ||
                 action.target?.field,
         )
     )
@@ -86,9 +111,15 @@ export function renderRecordingSpec(recording, channel) {
         )
     )
         statements.push(recordedSelectTrigger.toString());
+    if (recording.actions.some((a) => a.kind === 'click' && a.target?.locator === 'fieldSelect'))
+        statements.push(clickRecordedSelectTrigger.toString());
+    if (recording.actions.some((action) => action.target?.locator === 'selectSearch'))
+        statements.push(recordedSelectSearch.toString());
     if (
         recording.actions.some((action) =>
-            ['formNumber', 'fieldSelect', 'selectOption'].includes(action.target?.locator),
+            ['formNumber', 'fieldSelect', 'selectOption', 'selectSearch'].includes(
+                action.target?.locator,
+            ),
         )
     )
         statements.push(`const selectMarkup = ${JSON.stringify(selectMarkup)};`);
@@ -121,9 +152,19 @@ export function renderRecordingSpec(recording, channel) {
         );
     if (channel) statements.push(`test.use({ channel: ${JSON.stringify(channel)} });`);
     statements.push('', "test('录制用例', async ({ page }) => {");
+    if (parameterized)
+        statements.push(
+            `    const data = replayData(${JSON.stringify(recording.parameters)}, {}, new Date().toISOString().replace(/[:.]/g, '-'));`,
+        );
     if (recording.actions[0]?.kind !== 'goto')
         statements.push(`    await page.goto(${JSON.stringify(recording.url)});`);
     for (const action of recording.actions) {
+        if (action.kind === 'editor') {
+            statements.push(
+                `    await replayEditorOperation(page, ${JSON.stringify(action.operation)}${parameterized ? ', data' : ''});`,
+            );
+            continue;
+        }
         if (action.kind === 'goto') {
             statements.push(`    await page.goto(${JSON.stringify(action.url)});`);
             continue;
@@ -133,6 +174,10 @@ export function renderRecordingSpec(recording, channel) {
             continue;
         }
         const target = recordedLocator(action.target, ui);
+        if (target && action.kind === 'click' && action.target.locator === 'fieldSelect') {
+            statements.push(`    await clickRecordedSelectTrigger(${target}, selectMarkup);`);
+            continue;
+        }
         if (
             target &&
             action.target.locator === 'selectOption' &&
@@ -165,10 +210,11 @@ export function renderRecordingSpec(recording, channel) {
             continue;
         }
         if (target && action.kind === 'assert') {
+            const expectedValue = action.parameter
+                ? `data[${JSON.stringify(action.parameter)}]`
+                : JSON.stringify(action.value);
             const check =
-                action.assertion === 'value'
-                    ? `toHaveValue(${JSON.stringify(action.value)})`
-                    : 'toBeVisible()';
+                action.assertion === 'value' ? `toHaveValue(${expectedValue})` : 'toBeVisible()';
             statements.push(`    await expect(${target}).${check};`);
             continue;
         }
@@ -183,7 +229,10 @@ export function renderRecordingSpec(recording, channel) {
         let argument = action.value;
         if (action.kind === 'press') argument = action.key;
         if (action.kind === 'select') argument = { label: action.value };
-        statements.push(`    await ${target}.${method}(${JSON.stringify(argument) ?? ''});`);
+        const arg = action.parameter
+            ? `data[${JSON.stringify(action.parameter)}]`
+            : (JSON.stringify(argument) ?? '');
+        statements.push(`    await ${target}.${method}(${arg});`);
     }
     return [...statements, '});', ''].join('\n');
 }

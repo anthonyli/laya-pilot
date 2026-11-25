@@ -339,6 +339,65 @@ book.save(sys.argv[1])
     },
 );
 
+test('Excel replay budgets each recorded scene independently and honors explicit limits', async () => {
+    await fixture(async (directory, url) => {
+        const workbook = path.join(directory, 'steps.xlsx');
+        const written = await run(python, [
+            '-c',
+            `
+import sys
+from openpyxl import Workbook
+book = Workbook()
+sheet = book.active
+sheet.append(['用例编号', '用例名称', '测试步骤', '预期结果', '测试数据'])
+for ident, data in [('REC-001', '{"recordedScene":{"kind":"custom"}}'), ('002', '{}')]:
+    sheet.append([ident, '页面检查', '\\n'.join(['观察页面'] * 26), '页面显示“列表”', data])
+book.save(sys.argv[1])
+`,
+            workbook,
+        ]);
+        assert.equal(written.code, 0, written.stderr);
+        for (const [label, options, completed] of [
+            ['default', [], [26, 25]],
+            ['limited', ['--max-steps', '2'], [2, 2]],
+        ]) {
+            const out = path.join(directory, label);
+            const executed = await run(
+                process.execPath,
+                [
+                    path.join(root, 'bin/laya.mjs'),
+                    'replay',
+                    workbook,
+                    '--url',
+                    url,
+                    '--lazy-model',
+                    '--provider',
+                    'local',
+                    '--headless',
+                    '--python',
+                    python,
+                    '--out',
+                    out,
+                    '--delay',
+                    '0',
+                    ...options,
+                ],
+                { env: { ...process.env, LAYA_HOME: directory } },
+            );
+            const { results } = JSON.parse(
+                await fs.readFile(path.join(out, 'results.json'), 'utf8'),
+            );
+            assert.deepEqual(
+                results.map((r) => r.evidence.filter((e) => e.status === '已完成').length),
+                completed,
+                executed.stdout,
+            );
+            assert.match(results.at(-1).reason, /最大操作次数/);
+            assert.equal(results[0].status, label === 'default' ? '通过' : '部分执行（未完成）');
+        }
+    });
+});
+
 function run(command, args, options = {}) {
     return new Promise((resolve, reject) => {
         const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });

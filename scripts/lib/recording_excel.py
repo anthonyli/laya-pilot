@@ -6,7 +6,8 @@ from copy import copy
 from openpyxl import load_workbook
 
 
-cases = json.load(sys.stdin)
+recording = json.load(sys.stdin)
+cases = recording['cases']
 book = load_workbook(sys.argv[1])
 sheet = book['测试用例']
 fields = ['id', 'title', 'preconditions', 'data', 'steps', 'expected']
@@ -40,5 +41,20 @@ for case in cases:
         row += 1
     if row - first > 1:
         sheet.merge_cells(start_row=first, end_row=row - 1, start_column=2, end_column=2)
+if recording['pages']:
+    pages = book.create_sheet('录制页面')
+    pages.append(['访问顺序', '页面 URL'])
+    for index, url in enumerate(recording['pages'], 1):
+        if len(url) > 32767:
+            raise ValueError('录制页面 URL 超过 Excel 单元格长度上限')
+        pages.append([index, url])
+        pages.cell(index + 1, 2).data_type = 's'
+    for cell in pages[1]:
+        cell.font = copy(sheet['A1'].font)
+        cell.fill = copy(sheet['A1'].fill)
+    pages.column_dimensions['A'].width = 14
+    pages.column_dimensions['B'].width = 90
+    pages.freeze_panes = 'B2'
+
 with open(sys.argv[2], 'xb') as output:
     book.save(output)

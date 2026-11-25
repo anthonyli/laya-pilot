@@ -75,17 +75,21 @@ function excelReplaySection(excel, generated, adapterFile) {
 
 async function recordExcel(url, output, options, channel, storageState) {
     const excel = path.resolve(options['excel-out'] ?? output.replace(/\.spec\.cjs$/, '.xlsx'));
-    const [{ captureRecording }, { generateRecordedCases }, { renderRecordingSpec }, converter] =
-        await Promise.all([
-            import('./recording-capture.mjs'),
-            import('./recording-cases.mjs'),
-            import('./recording-spec.mjs'),
-            import('./recorded-excel.mjs'),
-        ]);
+    const [
+        { captureRecording },
+        { generateRecordedCases, parameterizeRecordedFields },
+        { renderRecordingSpec },
+        converter,
+    ] = await Promise.all([
+        import('./recording-capture.mjs'),
+        import('./recording-cases.mjs'),
+        import('./recording-spec.mjs'),
+        import('./recorded-excel.mjs'),
+    ]);
     printPanel('Record', 'A browser is opening. Use test data in the recording.', [
         ['IN THE BROWSER', ['Perform the workflow, then finish recording or close the browser.']],
     ]);
-    const recording = await captureRecording({
+    const captured = await captureRecording({
         playwright: require('playwright'),
         uiAdapters: await loadUiAdapter(options['ui-adapter']),
         url: url.href,
@@ -97,6 +101,7 @@ async function recordExcel(url, output, options, channel, storageState) {
         authCheck: options['auth-check'] || process.env.TEST_AUTH_CHECK,
         onAuth: (message) => console.log(message),
     });
+    const recording = options['split-cases'] ? captured : parameterizeRecordedFields(captured);
     const spec = renderRecordingSpec(recording, options['browser-channel']);
     await fs.mkdir(path.dirname(output), { recursive: true });
     let generated;
@@ -119,7 +124,7 @@ async function recordExcel(url, output, options, channel, storageState) {
         mode: 0o600,
     });
     try {
-        await converter.writeRecordedCases(generated.cases, excel, options.python);
+        await converter.writeRecordedCases(generated.cases, excel, options.python, generated.pages);
     } catch (error) {
         printPanel(
             'Record',

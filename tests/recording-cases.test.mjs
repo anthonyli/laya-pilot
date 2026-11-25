@@ -216,3 +216,71 @@ test('a long sequence keeps every repeated switch and the actions after a review
         true,
     );
 });
+
+test('replay parameters share one short value across fills, checkpoints and the saved row', async () => {
+    const { parameterizeRecordedFields } = await import('../scripts/lib/recording-cases.mjs');
+    const { replayData, variables } = await import('../scripts/lib/language.mjs');
+    const { renderRecordingSpec } = await import('../scripts/lib/recording-spec.mjs');
+    const s = state([]),
+        name = 'demo';
+    const fill = event('fill', 'Function Name', s, s, { role: 'textbox', value: name });
+    const check = { ...fill, kind: 'assert', assertion: 'value' };
+    const edit = click('Edit', s, s, { row: name });
+    edit.target.rowHeader = 'Function Name';
+    const recording = {
+        url,
+        actions: [click('Add', s, s), fill, check, click('Save', s, s), edit],
+    };
+    const bound = parameterizeRecordedFields(recording);
+    const generated = generateRecordedCases(bound);
+    const data = replayData(bound.parameters, {}, '2026-11-25T12-11-22-123Z');
+    const again = replayData(bound.parameters, {}, '2026-11-25T12-11-22-124Z');
+    assert.match(data.recordName1, /^demo[a-z0-9]+$/);
+    assert.notEqual(again.recordName1, data.recordName1);
+    const steps = variables(generated.cases.map((c) => c.steps).join('\n'), data);
+    assert.equal(steps.split(data.recordName1).length - 1, 3);
+    assert.equal(
+        replayData(bound.parameters, { recordName1: 'specific' }, 'run-2').recordName1,
+        'specific',
+    );
+    assert.equal((renderRecordingSpec(bound).match(/data\["recordName1"\]/g) ?? []).length, 3);
+    assert.equal(fill.parameter, undefined);
+    const description = event('fill', 'Description', s, s, { role: 'textbox', value: 'desc' });
+    const withDescription = parameterizeRecordedFields({
+        ...recording,
+        actions: [recording.actions[0], fill, description, ...recording.actions.slice(2)],
+    });
+    assert.deepEqual(withDescription.parameters, {
+        recordName1: 'demo${runKey}',
+        recordDescription1: 'desc${runKey}',
+    });
+    assert.deepEqual(
+        parameterizeRecordedFields({
+            ...recording,
+            actions: [...recording.actions, click(name, s, s, { role: 'option' })],
+        }).parameters,
+        {},
+    );
+    assert.deepEqual(
+        parameterizeRecordedFields({
+            ...recording,
+            actions: [
+                recording.actions[0],
+                { ...fill, target: { ...fill.target, maxLength: 6 } },
+                recording.actions[3],
+            ],
+        }).parameters,
+        {},
+    );
+});
+
+test('editor steps preserve literal syntax, line breaks and semicolons in formulas', async () => {
+    const { editorStep } = await import('../scripts/lib/recorded-editor.mjs');
+    const { variables } = await import('../scripts/lib/language.mjs');
+    const op = { type: 'text', value: '"a";\n${literal};' };
+    const step = editorStep(op);
+    const steps = lines(variables('1. ' + step + '\n2. 点击「Test」按钮', {}));
+    assert.equal(steps.length, 2);
+    assert.deepEqual(describe(steps[0]).operation, op);
+    assert.equal(stepDiagnostic('编辑器操作 {oops}').status, 'needs-review');
+});

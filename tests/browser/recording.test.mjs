@@ -81,6 +81,8 @@ test('records a portal tooltip as a menu name and binds repeated action icons to
             await page.getByRole('button', { name: '完成录制' }).click();
         },
     });
+    assert.deepEqual(recording.pages, [url, url + '#list']);
+    assert.deepEqual(generateRecordedCases(recording, { splitCases: true }).pages, recording.pages);
     const steps = generateRecordedCases(recording).cases.flatMap((entry) => lines(entry.steps));
     assert.ok(steps.includes('展开「Indicator Center」导航菜单'));
     const bind = '在「ID」列中定位值为「Second」的唯一记录';
@@ -190,6 +192,12 @@ test('records through login and reload, retains unresolved steps, and moves the 
     await fs.writeFile(specFile, spec);
     const python = process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3';
     assert.deepEqual(await exportRecording(specFile, workbook, python), generated);
+    const { stdout: visits } = await exec(python, [
+        '-c',
+        "import sys,json; from openpyxl import load_workbook; w=load_workbook(sys.argv[1],read_only=True); print(json.dumps([row[1] for row in list(w['录制页面'].values)[1:]]))",
+        workbook,
+    ]);
+    assert.deepEqual(JSON.parse(visits), recording.pages);
     const reader = fileURLToPath(new URL('../../scripts', import.meta.url));
     const { stdout } = await exec(
         python,

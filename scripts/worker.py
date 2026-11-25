@@ -75,6 +75,8 @@ def read_excel(filename):
 
 def _read_sheets(wb, cases, warnings, merges):
     for sheet in wb:
+        if sheet.title == '录制页面' and next(sheet.values, ()) == ('访问顺序', '页面 URL'):
+            continue
         mapping = None
         for rowno, row in enumerate(sheet.iter_rows(), 1):
             vals = [str(c.value if c.value is not None else '') for c in row]

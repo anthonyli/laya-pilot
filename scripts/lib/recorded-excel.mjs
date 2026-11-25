@@ -256,7 +256,7 @@ export function attachRecordedCases(source, generated) {
     return `${source}${manifestMarker}${manifest}\n`;
 }
 
-export async function writeRecordedCases(cases, output, python) {
+export async function writeRecordedCases(cases, output, python, pages = []) {
     if (!Array.isArray(cases) || !cases.length) throw Error('没有可导出的录制用例。');
     const settings = !python && (await resolveSkillSettings([])).settings;
     python ||= settings.python;
@@ -280,7 +280,7 @@ export async function writeRecordedCases(cases, output, python) {
             code === 0 ? resolve() : reject(Error(`Excel 导出失败：${details}`)),
         );
         child.stdin.on('error', reject);
-        child.stdin.end(JSON.stringify(cases));
+        child.stdin.end(JSON.stringify({ cases, pages }));
     });
 }
 
@@ -313,7 +313,7 @@ export async function exportRecording(file, output, python) {
             await writeRecordedCases(scenes.cases, output, python);
             return scenes;
         }
-        await writeRecordedCases(generated.cases, output, python);
+        await writeRecordedCases(generated.cases, output, python, generated.pages);
         return generated;
     }
     const testCase = recordedCase(source);

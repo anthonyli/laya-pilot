@@ -567,7 +567,10 @@ async function main() {
                     : c.url;
             r = await engine.runCase(
                 { ...c, url: startUrl },
-                { continueRecording: followsPrevious },
+                {
+                    continueRecording: followsPrevious,
+                    useRecordedStepCount: Boolean(scene?.kind) && !flag('--max-steps'),
+                },
             );
             assessNavigationHealth(c, r);
             await traces.end(r, r.evidence_dir);

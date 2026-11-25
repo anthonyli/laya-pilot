@@ -2,9 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { CaseDirectories, slug } from './run-layout.mjs';
 import { resolveUiAdapters } from './ui-adapters.mjs';
+import { replayEditorOperation } from './recorded-editor.mjs';
 import {
+    clickRecordedSelectTrigger,
     recordedFormItem,
     recordedSelectOption,
+    recordedSelectSearch,
     recordedSelectTrigger,
     selectSelectors,
 } from './recorded-select.mjs';
@@ -39,6 +42,7 @@ import {
     lines,
     variables,
     parseData,
+    replayData,
     norm,
     quoted,
 } from './language.mjs';
@@ -290,6 +294,11 @@ export class Engine {
                         container,
                     );
                     await locator.waitForElementState('visible', { timeout });
+                } else if (recordedRole === 'labelledButton') {
+                    locator = container
+                        .getByRole('button', options)
+                        .and(container.getByLabel(actual, { exact: true }));
+                    await locator.waitFor({ state: 'visible', timeout });
                 } else if (recordedRole === 'cardTitle') {
                     locator = await findDialogCard(container, actual, this.ui.cardTitle);
                 } else if (['namedNavIcon', 'namedIcon'].includes(recordedRole)) {
@@ -362,7 +371,9 @@ export class Engine {
             }
             console.log('  Laya → ' + found.control.name + ' [' + found.control.role + ']');
             this.navFailureStart = this.failures.length;
-            await found.locator.click();
+            if (recordedRole === 'fieldSelect')
+                await clickRecordedSelectTrigger(found.locator, this.selectMarkup);
+            else await found.locator.click();
             this.exactRecord = null;
             await settle(this.page, this.config.delay);
             await this.ready();
@@ -689,8 +700,9 @@ export class Engine {
         for (const spec of specs) await this.executeStep(text, spec);
     }
     async executeStep(text, spec) {
-        if (++this.actions > this.config.maxSteps)
-            throw new Halt('达到步骤上限', '本用例达到最大操作次数，停止继续尝试');
+        const limit = this.caseStepLimit ?? this.config.maxSteps;
+        if (++this.actions > limit)
+            throw new Halt('达到步骤上限', `本用例达到最大操作次数（${limit}），停止继续尝试`);
         console.log('  步骤：' + text);
         if (spec.verb === 'bindRow') {
             await this.bindRow(text);
@@ -772,7 +784,18 @@ export class Engine {
         // with the observation verb). Laya still selects the real DOM target below.
         const verb = spec.verb;
         let control;
-        if (verb === 'navigate') {
+        if (verb === 'editor') {
+            await replayEditorOperation(
+                this.page,
+                spec.operation,
+                this.caseData,
+                this.config.pageTimeout,
+            );
+            control = {
+                name: spec.operation.name || spec.operation.path?.at(-1) || 'Monaco',
+                role: spec.operation.type,
+            };
+        } else if (verb === 'navigate') {
             if (!spec.target) throw new Halt('缺少测试数据', '没有明确网址');
             await this.navigate(spec.target);
         } else if (verb === 'path') {
@@ -870,7 +893,23 @@ export class Engine {
                 this.dirtyAreas.set(JSON.stringify(area), area);
             }
             let found;
-            if (spec.locator === 'formNumber') {
+            if (spec.locator === 'selectSearch') {
+                let container = spec.scope === 'dialog' ? await this.exactDialog() : this.page;
+                if (this.exactRecord) {
+                    const { row, reason } = await exactRecordRow(this.page, this.exactRecord);
+                    if (!row) throw new Halt('无法唯一定位记录', reason);
+                    container = row;
+                    this.exactRecord = null;
+                }
+                const name = this.config.labels?.[spec.target] || spec.target;
+                const locator = recordedSelectSearch(container, this.page, name, this.selectMarkup);
+                if ((await locator.count()) !== 1)
+                    throw new Halt(
+                        '字段操作范围不明确',
+                        `无法唯一定位「${name}」下拉框的搜索输入框`,
+                    );
+                found = { locator, control: { name, role: 'combobox' } };
+            } else if (spec.locator === 'formNumber') {
                 const container = spec.scope === 'dialog' ? await this.exactDialog() : this.page;
                 const item = recordedFormItem(container, this.page, spec.target, this.selectMarkup);
                 const locator = item
@@ -1213,9 +1252,12 @@ export class Engine {
             reason: passed ? '明确断言满足' : '实际页面状态与该预期不符，需核对需求或定位证据',
         };
     }
-    async runCase(c, { continueRecording = false } = {}) {
+    async runCase(c, { continueRecording = false, useRecordedStepCount = false } = {}) {
         this.current = c;
         this.actions = 0;
+        this.caseStepLimit = useRecordedStepCount
+            ? Math.max(this.config.maxSteps ?? 25, lines(c.steps).length)
+            : this.config.maxSteps;
         this.events = [];
         this.rowKey = null;
         this.exactRecord = null;
@@ -1273,7 +1315,8 @@ export class Engine {
                     '按要求跳过审批',
                     '用例包含审批流程操作或审批开关，不执行；仅展示审批状态的用例不按关键词排除',
                 );
-            const data = { ...parseData(c.data), ...this.config.data, runId: this.config.runId };
+            const data = replayData(parseData(c.data), this.config.data, this.config.runId);
+            this.caseData = data;
             let steps = lines(variables(c.steps, data));
             let expected = lines(variables(c.expected, data));
             const preconditions = lines(variables(c.preconditions, data));

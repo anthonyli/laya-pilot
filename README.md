@@ -101,7 +101,7 @@ laya record 'https://your-test-app.example/customers' --out recorded-cases/filte
 
 1. 在打开的浏览器里完成操作。Laya 按顺序记录操作，可用「添加检查点」手动标记要验证的内容。
 2. 点击「完成录制」或关闭浏览器，保存 `filter.xlsx`（按业务场景编号、依次回放的用例）和 `filter.spec.cjs`（Playwright 脚本）。成功登录后会按站点和账号保存本地会话及加密凭据。下次录制或 Excel 回放先验证会话，过期时自动登录、更新 auth 并继续用例。
-3. 未识别的操作会在原位置标为「待补录」，后续步骤继续保存。需要独立用例时，录制时加 `--split-cases`。回放 Excel 可加 `--cases REC-001` 单独执行一条用例。
+3. Excel 的「录制页面」表按顺序列出本次实际访问的同源页面，保留普通查询参数与哈希路由。未识别的操作会在原位置标为「待补录」，后续步骤继续保存。需要独立用例时，录制时加 `--split-cases`。回放 Excel 可加 `--cases REC-001` 单独执行一条用例。
 
 ```bash
 laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
@@ -116,7 +116,7 @@ laya replay recorded-cases/filter.spec.cjs --out runs/filter-check
 laya report runs/filter-check                # 在浏览器中打开 HTML 报告
 ```
 
-录制会保留输入的值，请使用测试数据。之前录好的脚本可以用 `laya export-excel FILE.spec.cjs` 转成 Excel。更多说明见 [录制与回放](references/recording.md)。
+连续回放时，符合条件的新增名称和描述会自动带上本轮唯一后缀。其他测试值可在 Excel「测试数据」列用 `${runKey}` 生成，并在步骤和预期中复用。之前录好的脚本可以用 `laya export-excel FILE.spec.cjs` 转成 Excel。更多说明见 [录制与回放](references/recording.md)。
 
 ### 从页面生成用例
 

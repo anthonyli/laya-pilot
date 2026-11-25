@@ -101,7 +101,7 @@ laya record 'https://your-test-app.example/customers' --out recorded-cases/filte
 
 1. Perform the workflow in the browser. Laya records your actions in order. Use the toolbar to mark a checkpoint or move the toolbar to the other edge.
 2. Finish the recording or close the browser to save `filter.xlsx` (editable cases numbered by business scenario) and `filter.spec.cjs` (the Playwright script). After a successful recorded login, the session and encrypted credentials are saved per site and account. Recording and Excel replay validate the session, sign in automatically when it expires, and save the refreshed session before continuing.
-3. Unrecognized actions are marked in place, with later steps preserved. To generate independent cases, record with `--split-cases`. When replaying, use `--cases REC-001` to run a single case.
+3. The “录制页面” worksheet lists visited same-origin URLs in order, including ordinary query parameters and hash routes. Unrecognized actions are marked in place, with later steps preserved. To generate independent cases, record with `--split-cases`. When replaying, use `--cases REC-001` to run a single case.
 
 ```bash
 laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
@@ -116,7 +116,7 @@ laya replay recorded-cases/filter.spec.cjs --out runs/filter-check
 laya report runs/filter-check                # open the HTML report
 ```
 
-Recordings keep the values you type, so use test data. Convert an earlier recording with `laya export-excel FILE.spec.cjs`. See [Recording and replay](references/recording.md).
+Sequential recordings add a per-run suffix to eligible new record names and descriptions. Use `${runKey}` in workbook test data to generate other per-run values and reference them from steps and assertions. Convert an earlier recording with `laya export-excel FILE.spec.cjs`. See [Recording and replay](references/recording.md).
 
 ### Generate cases from a page
 

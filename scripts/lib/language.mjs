@@ -30,6 +30,10 @@ export const quoted = (s) => [...s.matchAll(/[“「『"]([^”」』"]*)[”」
 export function lines(s) {
     const parts = [];
     for (const line of String(s || '').split(/\r?\n/)) {
+        if (/^\s*(?:\d+[、.．)）:]\s*)?编辑器操作 \{/.test(line)) {
+            parts.push(line);
+            continue;
+        }
         // Recognize the same quoted spans as quoted(); only split outside them.
         let start = 0;
         const tokens = /[“「『"]([^”」』"]*)[”」』"]|[；;]/g;
@@ -60,7 +64,39 @@ export function parseData(s) {
         throw new Halt('测试数据格式不明确', '测试数据请使用 JSON 对象，或每行 名称=值');
     return Object.fromEntries(pairs.map((m) => [m[1].trim(), m[2].trim()]));
 }
+export function replayData(defaults, overrides, runId) {
+    const values = { ...defaults, ...overrides };
+    if (!runId) return values;
+    const digits = String(runId).replace(/\D/g, '');
+    const runKey = digits ? BigInt(digits).toString(36) : String(runId);
+    Object.assign(values, { runId, runKey });
+    for (const [key, value] of Object.entries(defaults)) {
+        if (
+            !['runId', 'runKey'].includes(key) &&
+            !Object.hasOwn(overrides || {}, key) &&
+            typeof value === 'string'
+        )
+            values[key] = value.replace(/\$\{(runId|runKey)\}/g, (_, key) => values[key]);
+    }
+    return values;
+}
 export function describe(step) {
+    const labelled = step.match(/^(在弹窗中)?点击标签为「([^」]+)」的按钮$/);
+    if (labelled)
+        return {
+            verb: 'click',
+            target: labelled[2],
+            recordedRole: 'labelledButton',
+            ...(labelled[1] && { scope: 'dialog' }),
+        };
+    if (step.startsWith('编辑器操作 ')) {
+        try {
+            const operation = JSON.parse(step.slice('编辑器操作 '.length));
+            if (operation && ['tree', 'cursor', 'key', 'text', 'suggest'].includes(operation.type))
+                return { verb: 'editor', target: 'Monaco', operation };
+        } catch {}
+        return { verb: 'unsupported', target: step };
+    }
     const q = quoted(step);
     let m;
     if (
@@ -108,6 +144,21 @@ export function describe(step) {
         };
     if ((m = step.match(/^切换到「([^」]+)」区域$/)))
         return { verb: 'click', target: m[1], recordedRole: 'area' };
+    if ((m = step.match(/^在(弹窗的)?「([^」]+)」下拉框中搜索「([^」]+)」$/)))
+        return {
+            verb: 'fill',
+            target: m[2],
+            value: m[3],
+            locator: 'selectSearch',
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if ((m = step.match(/^清空(弹窗的)?「([^」]+)」下拉框的搜索内容$/)))
+        return {
+            verb: 'clear',
+            target: m[2],
+            locator: 'selectSearch',
+            ...(m[1] && { scope: 'dialog' }),
+        };
     if ((m = step.match(/^在弹窗中点击「([^」]+)」按钮$/)))
         return { verb: 'click', target: m[1], scope: 'dialog' };
     if ((m = step.match(/^在弹窗中点击标题为「([^」]+)」的卡片$/)))

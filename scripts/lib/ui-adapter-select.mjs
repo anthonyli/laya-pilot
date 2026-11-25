@@ -25,8 +25,10 @@ export function selectOptionName(element) {
     );
 }
 
-export async function selectOptionChoices(within, name, markup) {
-    const options = within.locator(markup.option);
+export async function selectOptionChoices(page, within, name, markup) {
+    // Adapter selectors may include the popup itself as an ancestor.
+    const all = page.locator(markup.option);
+    const options = within === page ? all : all.and(within.locator('*'));
     const candidates = await options.elementHandles();
     let target;
     try {

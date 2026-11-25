@@ -20,7 +20,7 @@ export const tntd = {
         shell: '.tntd-rc-select,.tntd-select,.tntd-cascader-picker',
         trigger:
             '.tntd-rc-select-selection,.tntd-rc-select-selector,.tntd-select-selection,.tntd-select-selector,.tntd-cascader-picker',
-        popup: '.tntd-rc-select-dropdown,.tntd-select-dropdown,.tntd-cascader-menus,.tntd-cascader-dropdown',
-        option: '.tntd-rc-select-item-option,.tntd-select-item-option,.tntd-cascader-menu-item',
+        popup: '.tntd-rc-select-dropdown,.tntd-select-dropdown,.tntd-cascader-menus,.tntd-cascader-dropdown,.tntd-virtual-tree-select-dropdown',
+        option: '.tntd-rc-select-item-option,.tntd-select-item-option,.tntd-cascader-menu-item,.tntd-virtual-tree-select-dropdown .tntd-virtual-tree-title',
     },
 };

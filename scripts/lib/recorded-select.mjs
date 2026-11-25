@@ -1,5 +1,8 @@
 import { selectOptionChoices } from './ui-adapter-select.mjs';
 
+export const selectSearchInput =
+    'input[role=combobox]:is([type=search],[type=text],:not([type])):not(:disabled,[readonly],[aria-disabled=true],[aria-readonly=true])';
+
 export function selectSelectors(uiAdapters) {
     // Ant can put the semantic input inside its clickable surface and nest popup wrappers.
     const surface = `:is(${uiAdapters.select.trigger})`;
@@ -7,6 +10,7 @@ export function selectSelectors(uiAdapters) {
     return {
         ...uiAdapters.form,
         ...uiAdapters.select,
+        searchInput: selectSearchInput,
         trigger: `${surface},[role=combobox]:not(select):not(${surface} *):not(:has(${surface}))`,
         popup: `${popup}:not(:has(${popup}))`,
         option: `[role=option],${uiAdapters.select.option}`,
@@ -62,7 +66,7 @@ export async function recordedSelectOption(
     scope = page,
     timeout = 4000,
 ) {
-    const choices = (within) => selectOptionChoices(within, name, markup);
+    const choices = (within) => selectOptionChoices(page, within, name, markup);
     if (!opener) {
         const deadline = Date.now() + timeout;
         do {
@@ -126,4 +130,28 @@ export function recordedSelectTrigger(scope, page, name, markup) {
     const named = scope.getByRole('combobox', { name, exact: true }).and(surfaces);
     const inField = recordedFormItem(scope, page, name, markup).locator(markup.trigger);
     return named.or(inField).filter({ visible: true });
+}
+
+export async function clickRecordedSelectTrigger(trigger, markup) {
+    // Some single-select trees keep the popup open after committing a choice.
+    // Move focus to the requested field if that popup intercepts its click.
+    await trigger.evaluate((el, popup) => {
+        const box = el.getBoundingClientRect();
+        const hit = el.ownerDocument.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+        );
+        if (!hit || el.contains(hit) || !hit.closest(popup)) return;
+        const input = el.matches('[role=combobox]') ? el : el.querySelector('[role=combobox]');
+        input?.focus({ preventScroll: true });
+    }, markup.popup);
+    await trigger.click();
+}
+
+export function recordedSelectSearch(scope, page, name, markup) {
+    const inputs = scope.locator(markup.searchInput);
+    const named = scope.getByRole('combobox', { name, exact: true });
+    const placeholder = scope.getByPlaceholder(name, { exact: true });
+    const inField = recordedFormItem(scope, page, name, markup).locator(markup.searchInput);
+    return inputs.and(named.or(placeholder).or(inField)).filter({ visible: true });
 }
