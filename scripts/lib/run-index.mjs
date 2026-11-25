@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { LATEST_RUN, projectRunsDirectory, RUN_FILES } from './run-layout.mjs';
 import { writePrivateJson } from './run-state.mjs';
 import { eventLabel } from './diagnostics.mjs';
+import { reportStyles, setupScreenshotViewer } from './report-presentation.mjs';
 
 // Turns any run directory (ordinary Excel, structured plan or Playwright replay)
 // into one view: a reliability verdict, then every case with its timeline and
@@ -198,6 +199,7 @@ function fromPlaywright(report, out) {
                         a.files.map((file) => ({
                             name: retried ? `${a.label} · ${file.name}` : file.name,
                             path: relative(file.path),
+                            isImage: file.contentType?.startsWith('image/'),
                         })),
                     ),
                     trace: relative(trace?.path),
@@ -333,12 +335,18 @@ const localDate = (iso) => {
 const href = (file) => file.split('/').map(encodeURIComponent).join('/');
 const ORDER = { fail: 0, flaky: 1, blocked: 2, unverified: 3, neutral: 4, pass: 5 };
 
+function screenshotButton(file, caption, attachmentLabel) {
+    if (!file) return '';
+    const src = href(file);
+    const label = escape(caption);
+    const thumbnail = `<img loading="lazy" src="${src}" alt="">
+        <span class="shot-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6m-3-3v6"/></svg></span>`;
+    return `<button type="button" class="${attachmentLabel ? 'image-link' : 'shot'}" data-shot="${src}" data-caption="${label}" aria-haspopup="dialog" aria-label="放大查看：${label}">${attachmentLabel ? escape(attachmentLabel) : thumbnail}</button>`;
+}
+
 function caseHtml(c) {
     const kind = outcome(c.status);
-    const shot = (file, alt) =>
-        file
-            ? `<a href="${href(file)}" target="_blank"><img loading="lazy" src="${href(file)}" alt="${escape(alt)}"></a>`
-            : '';
+    const shot = (file, label) => screenshotButton(file, `${c.id} · ${c.title} · ${label}`);
     const rows = c.timeline
         .map(
             (t) => `<li class="${outcome(t.status)}">
@@ -358,18 +366,19 @@ function caseHtml(c) {
         ...c.network,
     ];
     return `<details class="case ${kind}" ${kind === 'pass' || kind === 'neutral' ? '' : 'open'} id="case-${escape(c.id)}">
-<summary><span class="badge ${kind}">${escape(c.status)}</span> <b>${escape(c.id)}</b> ${escape(c.title)}
+<summary><span class="badge ${kind}">${escape(c.status)}</span> <span class="case-id">${escape(c.id)}</span> <span class="case-title">${escape(c.title)}</span>
 <small>${escape(c.location || '')}${c.durationMs != null ? ` · ${Math.round(c.durationMs)}ms` : ''}</small></summary>
+<div class="case-body">
 ${c.reason ? `<p class="reason">${escape(c.reason)}${c.category ? ` <small>（${escape(c.category)}）</small>` : ''}</p>` : ''}
-${issues.length ? `<ul class="issues">${issues.map((i) => `<li class="${escape(i.tone || 'fail')}">${escape(i.text ?? i)}</li>`).join('')}</ul>` : ''}
-${rows ? `<ol class="timeline">${rows}</ol>` : ''}
+${issues.length ? `<details class="diagnostics"><summary>检查与诊断（${issues.length}）</summary><ul class="issues">${issues.map((i) => `<li class="${escape(i.tone || 'fail')}">${escape(i.text ?? i)}</li>`).join('')}</ul></details>` : ''}
+${rows ? `<h3>执行步骤</h3><ol class="timeline">${rows}</ol>` : ''}
 ${c.screenshot ? `<div class="final"><b>用例结束时的页面</b>${shot(c.screenshot, '用例结束')}</div>` : ''}
 ${c.screenshotError ? `<p class="note">${escape(c.screenshotError)}</p>` : ''}
 ${c.trace ? `<p class="files">执行轨迹：<a href="${href(c.trace)}">${escape(c.trace)}</a> · 查看：<code>npx playwright show-trace ${escape(c.trace)}</code></p>` : ''}
 ${c.traceError ? `<p class="note">${escape(c.traceError)}</p>` : ''}
-${(c.attachments || []).length ? `<p class="files">${c.attachments.map((a) => `<a href="${href(a.path)}">${escape(a.name)}</a>`).join(' · ')}</p>` : ''}
+${(c.attachments || []).length ? `<p class="files">${c.attachments.map((a) => (a.isImage ? screenshotButton(a.path, `${c.id} · ${a.name}`, a.name) : `<a href="${href(a.path)}">${escape(a.name)}</a>`)).join(' · ')}</p>` : ''}
 ${c.directory ? `<p class="files">证据目录：<a href="${href(c.directory)}/">${escape(c.directory)}/</a></p>` : ''}
-</details>`;
+</div></details>`;
 }
 
 export function renderIndex(view, assessment, files, hasTrace = false) {
@@ -382,38 +391,30 @@ export function renderIndex(view, assessment, files, hasTrace = false) {
     const links = files
         .map(
             ([name, description]) =>
-                `<li><a href="${href(name)}">${escape(name)}</a> ${escape(description)}</li>`,
+                `<li><a href="${href(name)}">${escape(name)}</a><span>${escape(description)}</span></li>`,
         )
         .join('');
     return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LayaPilot · ${escape(verdict.text)}</title>
-<style>
-:root{--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700;--info:#57606a;--line:#d0d7de;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#1f2328}
-body{max-width:1100px;margin:0 auto;padding:24px}h1{margin:0 0 4px}small{color:var(--info)}
-.verdict{border-left:6px solid;padding:12px 16px;margin:16px 0;background:#f6f8fa}.verdict.ok{border-color:var(--ok)}.verdict.bad{border-color:var(--bad)}.verdict.warn{border-color:var(--warn)}
-.verdict h2{margin:0 0 8px}.signals{margin:0;padding-left:20px}.signals .bad{color:var(--bad)}.signals .warn{color:var(--warn)}.signals .info{color:var(--info)}.signals .ok{color:var(--ok)}
-.stats{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.stat{border:1px solid var(--line);border-radius:6px;padding:8px 16px;min-width:90px}.stat b{display:block;font-size:24px}.stat.fail b{color:var(--bad)}.stat.pass b{color:var(--ok)}.stat.blocked b,.stat.unverified b{color:var(--warn)}
-.case{border:1px solid var(--line);border-radius:6px;margin:8px 0;padding:8px 12px}.case.fail{border-color:var(--bad)}.case.flaky,.case.blocked,.case.unverified{border-color:var(--warn)}
-summary{cursor:pointer}.badge{display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;color:#fff;background:var(--info)}.badge.pass{background:var(--ok)}.badge.fail{background:var(--bad)}.badge.flaky,.badge.blocked,.badge.unverified{background:var(--warn)}
-.reason{white-space:pre-wrap}.note{color:var(--warn)}
-.issues>li.pass,.timeline>li.pass .step b{color:var(--ok)}.issues>li.fail,.timeline>li.fail .step b{color:var(--bad)}
-.issues>li:is(.unverified,.blocked,.flaky),.timeline>li:is(.unverified,.blocked,.flaky) .step b{color:var(--warn)}.issues>li.neutral,.timeline>li.neutral .step b{color:var(--info)}
-.timeline{list-style:none;padding:0}.timeline li{border-top:1px solid var(--line);padding:8px 0;display:grid;grid-template-columns:1fr 280px;gap:12px;align-items:start}.timeline img{max-height:180px;object-fit:cover;object-position:top;width:100%}
-img{max-width:100%;border:1px solid var(--line);border-radius:4px}.final{margin-top:8px}.final img{max-width:480px;max-height:360px;object-fit:cover;object-position:top;display:block}
-.files{font-size:13px}table{border-collapse:collapse}td{padding:2px 8px;border-bottom:1px solid var(--line)}
-</style></head><body>
-<h1>LayaPilot 测试报告</h1>
-<small>${escape(view.kind)}${view.source ? ' · ' + escape(view.source) : ''}${view.provider ? ' · 模型：' + escape(view.provider) : ''} · 生成于 ${escape(new Date().toLocaleString('zh-CN'))}</small>
-<section class="verdict ${verdict.level}"><h2>${escape(verdict.text)}</h2>
+<style>${reportStyles}</style></head><body>
+<header class="masthead"><div class="brand-row"><div class="brand"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4l3-7 4 13 3-8h4"/></svg>LayaPilot</div>
+<small>生成于 ${escape(new Date().toLocaleString('zh-CN'))}</small></div></header>
+<main><h1>测试报告</h1>
+<p class="meta">${escape(view.kind)}${view.source ? ' · ' + escape(view.source) : ''}${view.provider ? ' · 模型：' + escape(view.provider) : ''}</p>
+<div class="overview"><section class="verdict ${verdict.level}"><h2>${escape(verdict.text)}</h2>
 <ul class="signals">${signals.map((s) => `<li class="${s.level}">${escape(s.text)}</li>`).join('')}</ul></section>
-<div class="stats">${stat('用例', assessment.total, '')}${stat('通过', assessment.passed, 'pass')}${stat('失败', assessment.failed, 'fail')}${assessment.flaky ? stat('不稳定', assessment.flaky, 'blocked') : ''}${assessment.skipped ? stat('跳过', assessment.skipped, '') : ''}${stat('阻断/未完成', assessment.blocked, 'blocked')}${stat('未验证预期', assessment.unverified, 'unverified')}</div>
-${view.error?.screenshot && !view.cases.some((c) => c.screenshot === view.error.screenshot) ? `<p>运行失败时的页面：<br><img src="${href(view.error.screenshot)}" style="max-width:480px"></p>` : ''}
+<div class="stats">${stat('用例', assessment.total, '')}${stat('通过', assessment.passed, 'pass')}${stat('失败', assessment.failed, 'fail')}${assessment.flaky ? stat('不稳定', assessment.flaky, 'blocked') : ''}${assessment.skipped ? stat('跳过', assessment.skipped, '') : ''}${stat('阻断/未完成', assessment.blocked, 'blocked')}${stat('未验证预期', assessment.unverified, 'unverified')}</div></div>
+${view.error?.screenshot && !view.cases.some((c) => c.screenshot === view.error.screenshot) ? `<section class="run-evidence final"><h3>运行失败时的页面</h3>${screenshotButton(view.error.screenshot, '运行失败时的页面')}</section>` : ''}
 ${view.externalReport ? `<p>Playwright 原始报告：<a href="${href(view.externalReport)}">${escape(view.externalReport)}</a></p>` : ''}
-<h2>用例</h2>
+<h2 class="section-title">用例</h2>
 ${cases.map(caseHtml).join('\n') || '<p>没有用例结果。</p>'}
-<h2>本目录文件</h2><ul>${links}</ul>
+<h2 class="section-title">本目录文件</h2><div class="resources"><ul class="file-list">${links}</ul>
 ${hasTrace || view.cases.some((c) => c.trace) ? `<p><small>执行轨迹记录了每次点击、页面变化和接口请求：<code>npx playwright show-trace 文件路径</code>，或把文件拖到 https://trace.playwright.dev 打开（只在本机浏览器中解析）。通过的用例不保留轨迹。</small></p>` : ''}
+</div></main>
+<dialog class="viewer" aria-labelledby="viewer-title"><header><span class="viewer-title" id="viewer-title">截图</span>
+<button type="button" autofocus aria-label="关闭大图"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><img alt=""></dialog>
+<script>(${setupScreenshotViewer.toString()})();</script>
 </body></html>
 `;
 }
