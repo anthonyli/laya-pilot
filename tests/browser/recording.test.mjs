@@ -385,9 +385,7 @@ test('replay reports agree on skipped, expected and flaky Playwright outcomes', 
         ['test-failed-1.png', /class="image-link" data-shot="([^"]+)"/g],
         ['trace.zip', /href="([^"]+)"/g],
     ]) {
-        const link = [...flaky.index.matchAll(attachment)].find(([, href]) =>
-            href.endsWith(name),
-        );
+        const link = [...flaky.index.matchAll(attachment)].find(([, href]) => href.endsWith(name));
         assert.ok(link, `missing first attempt ${name} link`);
         await fs.access(path.join(dir, 'flaky', decodeURIComponent(link[1])));
     }
