@@ -381,8 +381,11 @@ test('replay reports agree on skipped, expected and flaky Playwright outcomes', 
     assert.match(flaky.stdout, /0 passed · 0 failed · 0 skipped · 1 flaky/);
     assert.match(flaky.index, /first attempt evidence/);
     assert.match(flaky.summary, /first attempt evidence/);
-    for (const name of ['test-failed-1.png', 'trace.zip']) {
-        const link = [...flaky.index.matchAll(/href="([^"]+)"/g)].find(([, href]) =>
+    for (const [name, attachment] of [
+        ['test-failed-1.png', /class="image-link" data-shot="([^"]+)"/g],
+        ['trace.zip', /href="([^"]+)"/g],
+    ]) {
+        const link = [...flaky.index.matchAll(attachment)].find(([, href]) =>
             href.endsWith(name),
         );
         assert.ok(link, `missing first attempt ${name} link`);
