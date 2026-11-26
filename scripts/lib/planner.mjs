@@ -76,31 +76,52 @@ export async function semanticStep(
     const q = quoted(text),
         values = q.slice(1),
         normText = norm(text);
-    const candidates = [];
+    const candidates = [],
+        alternatives = [];
+    // Offer differently named controls for an explicit action, never infer a click
+    // from an assertion or a conditional instruction mentioning that action.
+    const directRequest =
+        /^(?:请(?:帮我)?|please\s+)?(?:点击|单击|进入|打开|输入|填写|填入|click\b|open\b|type\b|fill\b)/i.test(
+            text.trim(),
+        );
     for (const c of snapshot.controls) {
         if (c.role === 'password' || c.disabled || !c.name || c.name.startsWith('图标:')) continue;
         const matched =
             normText.includes(norm(c.name)) || q.some((t) => norm(c.name).includes(norm(t)));
-        if (!matched) continue;
+        if (!matched && !directRequest) continue;
         if (
+            !c.readonly &&
             ['textbox', 'spinbutton'].includes(c.role) &&
             values.length === 1 &&
             /(输入|填写|填入|type|fill)/i.test(text)
         )
-            candidates.push({ verb: 'fill', target: c.name, value: values[0] });
+            (matched ? candidates : alternatives).push({
+                verb: 'fill',
+                role: c.role,
+                target: c.name,
+                value: values[0],
+            });
         else if (
             ['button', 'link', 'tab', 'menuitem'].includes(c.role) &&
             /(点击|单击|进入|打开|click|open)/i.test(text)
         )
-            candidates.push({ verb: 'click', target: c.name });
+            (matched ? candidates : alternatives).push({
+                verb: 'click',
+                target: c.name,
+                role: c.role,
+            });
     }
-    const unique = [...new Map(candidates.map((s) => [JSON.stringify(s), s])).values()].slice(0, 6);
+    const unique = [
+        ...new Map([...candidates, ...alternatives].map((s) => [JSON.stringify(s), s])).values(),
+    ].slice(0, 6);
     const criteria = Object.fromEntries(
         unique.map((s, i) => [
             '动作' + (i + 1),
             (s.verb === 'fill' ? '填写' : '点击') +
                 s.target +
-                (s.value !== undefined ? '，值=' + s.value : ''),
+                (s.value !== undefined ? '，值=' + s.value : '') +
+                ' · ' +
+                s.role,
         ]),
     );
     criteria['缺少参数'] = '步骤要求操作，但没有足够明确的目标、测试值或可执行工具';

@@ -73,6 +73,7 @@ export function printRunHelp(version) {
                     '--ui-adapter FILE      Load project UI selectors for Excel replay',
                     '--module-routes FILE   Load fallback menu URLs from moduleRoutes in JSON',
                     '--allow-write          Allow authorized write operations',
+                    '--replay-menus         Verify menu clicks even when a business entry URL is available',
                 ],
             ],
             ['RECORDING', rows(recordingRows)],

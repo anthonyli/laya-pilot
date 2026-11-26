@@ -155,8 +155,9 @@ test('native icon buttons use live tooltips and keep text-labelled actions intac
         const laya = {
             choose: async (_, criteria) => {
                 modelCalls++;
-                assert.ok(Object.hasOwn(criteria, '导出'));
-                return { choice: '导出', probabilities: { 导出: 1 }, margin: 1 };
+                assert.ok(Object.hasOwn(criteria, '保存'));
+                assert.ok(!Object.hasOwn(criteria, '图标: export'));
+                return { choice: '停止', probabilities: { 停止: 1 }, margin: 1 };
             },
         };
         const found = await target(page, laya, '导出');
@@ -164,9 +165,75 @@ test('native icon buttons use live tooltips and keep text-labelled actions intac
         await found.locator.click();
         assert.equal(await page.locator('body').getAttribute('data-exported'), 'yes');
         assert.equal(modelCalls, 1);
+        assert.equal(found.decision, null);
     } finally {
         await browser.close();
     }
+});
+
+test('exact names bypass Laya and semantic clicks reach it before any rendering retries', async (t) => {
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.setContent('<input aria-label="Add"><button>Add</button><button>Cancel</button>');
+    const instruction = '在指标管理页面点击「新增指标」按钮';
+    const waits = [];
+    const wait = page.waitForTimeout.bind(page);
+    page.waitForTimeout = async (ms) => {
+        waits.push(ms);
+        return wait(ms);
+    };
+    let calls = 0;
+    const model = {
+        choose: async (state, choices) => {
+            calls++;
+            assert.equal(state, instruction);
+            assert.deepEqual(waits, []);
+            assert.deepEqual(Object.keys(choices), ['Add', 'Cancel', '停止']);
+            return { choice: 'Add', probabilities: { Add: 1 }, margin: 1 };
+        },
+    };
+    assert.equal((await target(page, model, 'Add', { role: 'button' })).decision, null);
+    const found = await target(page, model, '新增指标', { instruction, role: 'button' });
+    assert.equal(await found.locator.textContent(), 'Add');
+    assert.equal(calls, 1);
+
+    const late = await target(
+        page,
+        {
+            choose: async () => {
+                await page.evaluate(() =>
+                    setTimeout(
+                        () =>
+                            document.body.insertAdjacentHTML(
+                                'beforeend',
+                                '<button>Reports</button>',
+                            ),
+                        30,
+                    ),
+                );
+                return { choice: 'Stop' };
+            },
+        },
+        'Reports',
+    );
+    assert.equal(await late.locator.textContent(), 'Reports');
+    await assert.rejects(
+        target(
+            page,
+            {
+                choose: async () => {
+                    await page
+                        .getByRole('button', { name: 'Add' })
+                        .evaluate((el) => (el.textContent = 'Delete'));
+                    return { choice: 'Add', probabilities: { Add: 1 }, margin: 1 };
+                },
+            },
+            '新增指标',
+            { role: 'button' },
+        ),
+        { category: 'DOM已变化' },
+    );
 });
 
 async function cli(name, args, interruptOnWrite = false, extraEnv = {}) {
@@ -379,7 +446,7 @@ test('observed email and number bounds execute without submit and natural-langua
                 return { choice: '新增', probabilities: { 新增: 0.98 }, margin: 0.96 };
             },
         };
-        const found = await target(page, model, '新增');
+        const found = await target(page, model, '新增一条记录');
         assert.equal(calls, 1);
         assert.equal(await found.locator.textContent(), '新增');
         const w = new Workflow(

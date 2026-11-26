@@ -18,6 +18,7 @@ import { formItemLabel, onlyExpandedSelect, selectSelectors } from './recorded-s
 import {
     navigationScope,
     iconClassPattern,
+    readNavigationIconClass,
     iconOwner,
     declaredIconName,
 } from './recorded-navigation.mjs';
@@ -71,6 +72,7 @@ function installRecorder(
     editorPoint,
     editorKeys,
     treeNodePath,
+    readNavigationIconClass,
 ) {
     if (location.origin !== origin) return;
     const actionControls =
@@ -122,9 +124,8 @@ function installRecorder(
             return null;
         return { role: 'button', locator: 'cardTitle', scope: '弹窗', name };
     }
-    const iconToken = new RegExp(iconClassSource);
     const tooltipNames = () => visibleElements(document, '[role=tooltip]').map(visibleText);
-    let hoveredIcon;
+    let hoveredIcon, hoverIconClass;
     let previousTips = [];
     addEventListener(
         'pointerover',
@@ -134,6 +135,7 @@ function installRecorder(
             const owner = iconOwner(el);
             if (owner !== hoveredIcon) {
                 hoveredIcon = owner;
+                hoverIconClass = owner && navigationIconClass(el);
                 previousTips = owner ? tooltipNames() : [];
             }
         },
@@ -154,26 +156,19 @@ function installRecorder(
             role: nav ? 'navigation' : 'button',
             name,
             locator: nav ? 'namedNavIcon' : 'namedIcon',
+            ...(nav && {
+                iconClass:
+                    (owner === hoveredIcon && hoverIconClass) ||
+                    navigationIconClass(el) ||
+                    undefined,
+            }),
         });
     }
+    function navigationIconClass(clicked) {
+        return readNavigationIconClass(clicked, { navigationScope, iconClassSource });
+    }
     function navigationIcon(clicked) {
-        if (!clicked?.closest(navigationScope) || getComputedStyle(clicked).cursor !== 'pointer')
-            return null;
-        const icons = clicked.closest('svg')
-            ? [clicked.closest('svg')]
-            : visibleElements(clicked, 'svg');
-        if (icons.length !== 1) return null;
-        const tokens = [...icons[0].classList]
-            .filter(
-                (token) =>
-                    iconToken.test(token) &&
-                    /(?:menu|nav)/i.test(token) &&
-                    !/(?:^|[-_])(?:active|hover|selected|disabled|focus)(?:$|[-_])/i.test(token),
-            )
-            .sort((a, b) => b.length - a.length);
-        const iconClass = tokens.find(
-            (token) => visibleElements(document, `${navigationScope} svg.${token}`).length === 1,
-        );
+        const iconClass = navigationIconClass(clicked);
         if (!iconClass) return null;
         const links = visibleElements(document, 'a[href], [role=link]');
         if (links.length > 160) return null;
@@ -739,7 +734,10 @@ function installRecorder(
             }
             if (
                 el.closest('.overlayWidgets,.contentWidgets') ||
-                !el.closest('.lines-content,.view-lines')
+                !(
+                    el.closest('.lines-content,.view-lines') ||
+                    el.matches('textarea.inputarea,.monaco-scrollable-element')
+                )
             )
                 return;
             const from = editorPoint(root, { x: e.clientX, y: e.clientY });
@@ -1487,7 +1485,7 @@ export async function captureRecording({
             selectMarkup: selectSelectors(ui),
         };
         await context.addInitScript({
-            content: `(${installRecorder})(${JSON.stringify(recorderOptions)}, ${iconOwner}, ${declaredIconName}, ${formItemLabel}, ${onlyExpandedSelect}, ${selectOptionName}, ${editorPoint}, ${JSON.stringify(editorKeys)}, ${treeNodePath})`,
+            content: `(${installRecorder})(${JSON.stringify(recorderOptions)}, ${iconOwner}, ${declaredIconName}, ${formItemLabel}, ${onlyExpandedSelect}, ${selectOptionName}, ${editorPoint}, ${JSON.stringify(editorKeys)}, ${treeNodePath}, ${readNavigationIconClass})`,
         });
         const pages = [];
         page.on('framenavigated', (frame) => {

@@ -6,17 +6,19 @@ const privileged = /管理员|超级|全部|所有|admin|superuser|root|full.acc
 const testing = /测试|自动化|test|sandbox|demo/i;
 const ordinary = /只读|查看者|普通|访客|read.only|viewer|guest|basic/i;
 
+export function optionPurpose(name) {
+    if (ordinary.test(name)) return '普通或只读选项';
+    if (testing.test(name)) return '测试用途选项';
+    return '';
+}
+
 export function optionGroups(label, options) {
     const permission = /角色|权限|role|permission/i.test(label);
     const groups = new Map();
     for (const option of options) {
         if (/^(全部|所有|请选择|无)$/.test(option.name)) continue;
         if (permission && privileged.test(option.name)) continue;
-        const group = ordinary.test(option.name)
-            ? '普通或只读选项'
-            : testing.test(option.name)
-              ? '测试用途选项'
-              : '其他可用选项';
+        const group = optionPurpose(option.name) || '其他可用选项';
         if (!groups.has(group)) groups.set(group, []);
         groups.get(group).push(option);
     }

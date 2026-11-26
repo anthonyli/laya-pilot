@@ -465,77 +465,14 @@ export async function discoverRowLabels(page, rowKey) {
     await page.mouse.move(0, 0);
     return observe(page);
 }
-export async function target(
-    page,
+async function chooseLiveTarget(
     laya,
     intent,
-    {
-        kind = 'click',
-        value,
-        meta = {},
-        rowKey,
-        ordinal,
-        allowDisabled = false,
-        requireMenu = false,
-        minProbability = 0.68,
-        minMargin = 0.18,
-    } = {},
+    kind,
+    candidates,
+    snap,
+    { ordinal, instruction, minProbability, minMargin, meta },
 ) {
-    let snap = await observe(page);
-    // Global toolbar icons need the same live tooltip discovery as row actions.
-    // Do it only when the requested action has no named match in its scope.
-    const namedMenu = (c) =>
-        !c.rowKey &&
-        ['link', 'menuitem', 'button', 'tab', 'treeitem'].includes(c.role) &&
-        norm(c.name) === norm(intent);
-    const named = requireMenu ? namedMenu : (c) => score(intent, c) >= 65;
-    const scoped = snap.controls.filter((c) => c.rowKey === (rowKey || ''));
-    if (
-        ['click', 'hover'].includes(kind) &&
-        !scoped.some(named) &&
-        (scoped.some((c) => /^图标[:：]/.test(c.name)) ||
-            snap.unidentifiedControls.some((c) => c.rowKey === (rowKey || '')))
-    )
-        snap = await discoverRowLabels(page, rowKey || '');
-    // Bounded observation retries accommodate late asynchronous rendering; no action is retried.
-    for (let i = 0; i < 8 && !snap.controls.some(named); i++) {
-        await page.waitForTimeout(250);
-        snap = await observe(page);
-    }
-    if (requireMenu) {
-        const menus = snap.controls.filter(namedMenu);
-        if (!menus.length) return null;
-        if (menus.every((c) => c.disabled))
-            throw new Halt('菜单不可用', '目标菜单已禁用：' + intent);
-    }
-    let candidates = snap.controls.filter(
-        (c) => c.role !== 'password' && (allowDisabled || !c.disabled),
-    );
-    if (requireMenu) candidates = candidates.filter(namedMenu);
-    const orderedLocator =
-        ordinal && page.getByRole('button', { name: intent, exact: true }).nth(ordinal - 1);
-    if (orderedLocator) {
-        const ref = await orderedLocator.getAttribute(ATTR, { timeout: 1200 }).catch(() => null);
-        candidates = candidates.filter((c) => ref && c.frame === 0 && c.ref === ref);
-        if (!candidates.length)
-            throw new Halt('录制位置未确认', `没有找到第 ${ordinal} 个可用的「${intent}」按钮。`);
-    }
-    if (rowKey) candidates = candidates.filter((c) => c.rowKey === rowKey);
-    if (['fill', 'clear', 'value', 'empty'].includes(kind))
-        candidates = candidates.filter(
-            (c) =>
-                !c.readonly &&
-                (['textbox', 'spinbutton'].includes(c.role) ||
-                    (['fill', 'clear'].includes(kind) && c.editableCombobox && c.name === intent)),
-        );
-    if (kind === 'select')
-        candidates = candidates.filter((c) => c.role === 'combobox' || c.tag === 'select');
-    if (['check', 'uncheck', 'checked'].includes(kind))
-        candidates = candidates.filter((c) => ['checkbox', 'radio', 'switch'].includes(c.role));
-    if (kind === 'option')
-        candidates = candidates.filter(
-            (c) => c.role === 'option' || c.role === 'menuitem' || c.role === 'button',
-        );
     const ranked = candidates
         .map((c) => ({ ...c, rank: score(intent, c) }))
         .sort((a, b) => b.rank - a.rank);
@@ -555,24 +492,14 @@ export async function target(
             continue;
         unique.push(c);
     }
-    const unknown = snap.unidentifiedControls.filter(
-        (c) => (!rowKey || c.rowKey === rowKey) && !c.disabled,
-    );
-    if (unknown.length && !ranked.some((c) => c.rank >= 65))
-        throw new Halt(
-            '控件语义不明确',
-            `已发现 ${unknown.length} 个无标签控件，但不能确认“${intent}”的目标；请查看未识别控件诊断并提供标签或显式绑定。`,
-        );
-    if (!unique.length)
-        throw new Halt('页面控件不足', `当前页面没有可用于${kind}的控件：${intent}`);
     const shortlist = unique.slice(0, 5);
+    const exactContexts = [
+        ...new Set(ranked.filter((c) => c.name === intent).map((c) => c.context)),
+    ];
+    const source = norm(instruction || intent);
     if (
-        ranked.length >= 2 &&
-        ranked[0].rank >= 100 &&
-        ranked[1].rank === ranked[0].rank &&
-        ranked[0].name === ranked[1].name &&
-        ranked[0].context !== ranked[1].context &&
-        !norm(intent).includes(norm(ranked[0].context))
+        exactContexts.length > 1 &&
+        !exactContexts.some((context) => context && source.includes(norm(context)))
     )
         throw new Halt('目标不唯一', `多个区域存在“${intent}”，请在步骤写明记录名称或区域。`);
     const en = /[a-z]/i.test(intent) && !/[\u4e00-\u9fff]/.test(intent);
@@ -600,20 +527,27 @@ export async function target(
     const keyed = shortlist.map((c, i) => ({
         key:
             c.name.slice(0, 36) +
-            (shortlist.filter((x) => x.name === c.name).length > 1
+            (['停止', 'Stop'].includes(c.name.slice(0, 36)) ||
+            shortlist.filter((x) => x.name.slice(0, 36) === c.name.slice(0, 36)).length > 1
                 ? ' [' + (c.context.slice(0, 16) || c.role) + '] #' + i
                 : ''),
         control: c,
     }));
     const recordedAction = ordinal ? `点击第 ${ordinal} 个「${intent}」按钮` : null;
     const criteria = Object.fromEntries(
-        keyed.map(({ key, control: c }) => [key, recordedAction || prefix + c.name.slice(0, 38)]),
+        keyed.map(({ key, control: c }) => [
+            key,
+            recordedAction ||
+                [prefix + c.name.slice(0, 60), c.role, c.context?.slice(0, 45)]
+                    .filter(Boolean)
+                    .join(' · '),
+        ]),
     );
     const stopKey = en ? 'Stop' : '停止';
     criteria[stopKey] = en ? 'Do not perform any action' : '不执行';
     const state = recordedAction
         ? `用户录制的步骤：${recordedAction}。已在当前页面按名称核对按钮顺序，候选对应此位置。`
-        : prefix + intent;
+        : instruction || prefix + intent;
     const decision = await laya.choose(state, criteria, {
         ...meta,
         phase: 'target',
@@ -630,6 +564,177 @@ export async function target(
         decision.margin < minMargin
     )
         throw new Halt('Laya选择不确定', `目标“${intent}”的候选评分或差距不足，停止本步。`);
+    return { control: c, decision };
+}
+
+export async function target(
+    page,
+    laya,
+    intent,
+    {
+        kind = 'click',
+        instruction,
+        role,
+        meta = {},
+        rowKey,
+        ordinal,
+        allowDisabled = false,
+        requireMenu = false,
+        minProbability = 0.68,
+        minMargin = 0.18,
+    } = {},
+) {
+    let snap = await observe(page);
+    const namedMenu = (c) =>
+        !c.rowKey &&
+        ['link', 'menuitem', 'button', 'tab', 'treeitem'].includes(c.role) &&
+        norm(c.name) === norm(intent);
+    const eligible = (c) => {
+        if (
+            c.role === 'password' ||
+            (role && c.role !== role) ||
+            (!allowDisabled && c.disabled) ||
+            (rowKey && c.rowKey !== rowKey)
+        )
+            return false;
+        if (requireMenu) return namedMenu(c);
+        if (['fill', 'clear', 'value', 'empty'].includes(kind))
+            return (
+                !c.readonly &&
+                (['textbox', 'spinbutton'].includes(c.role) ||
+                    (['fill', 'clear'].includes(kind) && c.editableCombobox && c.name === intent))
+            );
+        if (kind === 'select') return c.role === 'combobox' || c.tag === 'select';
+        if (['check', 'uncheck', 'checked'].includes(kind))
+            return ['checkbox', 'radio', 'switch'].includes(c.role);
+        if (kind === 'option') return ['option', 'menuitem', 'button'].includes(c.role);
+        return true;
+    };
+    const named = (c) => eligible(c) && score(intent, c) >= 65;
+    const disabledExact = (snapshot) =>
+        !allowDisabled &&
+        snapshot.controls.some(
+            (c) => c.name === intent && c.disabled && eligible({ ...c, disabled: false }),
+        ) &&
+        !snapshot.controls.some((c) => c.name === intent && eligible(c));
+    const orderedLocator =
+        ordinal && page.getByRole('button', { name: intent, exact: true }).nth(ordinal - 1);
+    const hasIcons = (snapshot) =>
+        ['click', 'hover'].includes(kind) &&
+        (snapshot.controls.some((c) => c.rowKey === (rowKey || '') && /^图标[:：]/.test(c.name)) ||
+            snapshot.unidentifiedControls.some((c) => c.rowKey === (rowKey || '')));
+    const choices = (snapshot) =>
+        snapshot.controls.filter((c) => eligible(c) && c.name && !/^图标[:：]/.test(c.name));
+    const decisionOptions = { ordinal, instruction, minProbability, minMargin, meta };
+    let selection, earlyRejection;
+    const initial = choices(snap);
+    const sameChoices = (current) =>
+        current.length === initial.length &&
+        current.every((c, i) =>
+            ['name', 'role', 'rowKey', 'context', 'href', 'frame'].every(
+                (key) => c[key] === initial[i][key],
+            ),
+        );
+    // Give a populated UI to Laya immediately. If it declines, allow late-rendered
+    // exact controls and tooltip-only actions to appear before giving up.
+    if (
+        !ordinal &&
+        !requireMenu &&
+        !disabledExact(snap) &&
+        !snap.controls.some(named) &&
+        initial.length
+    ) {
+        try {
+            selection = await chooseLiveTarget(laya, intent, kind, initial, snap, decisionOptions);
+        } catch (error) {
+            if (!['Laya无法判断', 'Laya选择不确定'].includes(error.category)) throw error;
+            earlyRejection = error;
+        }
+    }
+    if (!selection && !snap.controls.some(named)) {
+        if (hasIcons(snap)) snap = await discoverRowLabels(page, rowKey || '');
+        for (
+            let i = 0;
+            i < 8 && !snap.controls.some(named) && !(requireMenu && snap.controls.some(namedMenu));
+            i++
+        ) {
+            await page.waitForTimeout(250);
+            snap = await observe(page);
+            const current = choices(snap);
+            if (
+                !requireMenu &&
+                !disabledExact(snap) &&
+                current.length &&
+                (!earlyRejection || !sameChoices(current))
+            ) {
+                earlyRejection = null;
+                break;
+            }
+        }
+    }
+    if (requireMenu) {
+        const menus = snap.controls.filter(namedMenu);
+        if (!menus.length) return null;
+        if (menus.every((c) => c.disabled))
+            throw new Halt('菜单不可用', '目标菜单已禁用：' + intent);
+    }
+    if (disabledExact(snap)) throw new Halt('控件不可用', `目标控件已禁用：${intent}`);
+    let candidates = snap.controls.filter(eligible);
+    if (orderedLocator) {
+        const ref = await orderedLocator.getAttribute(ATTR, { timeout: 1200 }).catch(() => null);
+        candidates = candidates.filter((c) => ref && c.frame === 0 && c.ref === ref);
+        if (!candidates.length)
+            throw new Halt('录制位置未确认', `没有找到第 ${ordinal} 个可用的「${intent}」按钮。`);
+    }
+    if (!selection && !candidates.some(named)) {
+        if (earlyRejection) throw earlyRejection;
+        const unknown = snap.unidentifiedControls.filter(
+            (c) => (!rowKey || c.rowKey === rowKey) && !c.disabled,
+        );
+        candidates = candidates.filter((c) => c.name && !/^图标[:：]/.test(c.name));
+        if (!candidates.length && unknown.length)
+            throw new Halt(
+                '控件语义不明确',
+                `已发现 ${unknown.length} 个无标签控件，但不能确认“${intent}”的目标；请查看未识别控件诊断并提供标签或显式绑定。`,
+            );
+    }
+    if (!candidates.length)
+        throw new Halt('页面控件不足', `当前页面没有可用于${kind}的控件：${intent}`);
+    if (!selection) {
+        const exact = candidates.filter((c) => c.name === intent);
+        selection =
+            exact.length === 1
+                ? { control: exact[0], decision: null }
+                : await chooseLiveTarget(laya, intent, kind, candidates, snap, decisionOptions);
+    }
+    // A component can be relabelled or replaced while the model is deciding.
+    // Re-observe and keep the same element identity and action semantics.
+    if (selection.decision && !selection.control.binding && !ordinal) {
+        const chosen = selection.control;
+        const frame = snap.frames[chosen.frame];
+        const handles = await frame.locator(`[${ATTR}="${chosen.ref}"]`).elementHandles();
+        try {
+            snap = await observe(page);
+            const ref = handles.length === 1 && (await handles[0].getAttribute(ATTR));
+            candidates = snap.controls.filter(eligible);
+            const live = candidates.find((c) => snap.frames[c.frame] === frame && c.ref === ref);
+            if (
+                !live ||
+                ['name', 'role', 'rowKey', 'context', 'href'].some(
+                    (key) => live[key] !== chosen[key],
+                )
+            )
+                throw new Halt('DOM已变化', '模型判断期间目标控件发生变化，当前步骤停止。');
+            const exact = candidates.filter((c) => c.name === intent);
+            if (exact.length && live.name !== intent) {
+                if (exact.length !== 1) throw new Halt('目标不唯一', `多个控件匹配“${intent}”。`);
+                selection = { control: exact[0], decision: null };
+            } else selection.control = live;
+        } finally {
+            await Promise.all(handles.map((h) => h.dispose()));
+        }
+    }
+    const { control: c, decision } = selection;
     const locator = snap.frames[c.frame].locator(`[${ATTR}="${c.ref}"]`);
     if ((await locator.count()) !== 1 || !(await locator.isVisible()))
         throw new Halt('DOM已变化', '决定完成后DOM已变化，当前步骤停止，避免误点。');
@@ -665,7 +770,7 @@ export async function target(
             throw new Halt('DOM已变化', '显式控件绑定在决策期间发生变化，停止本步并重新校验。');
     }
     // Distinct identical controls require an explicit row/region, not a guessed index.
-    const identical = ranked.filter(
+    const identical = candidates.filter(
         (x) => x.name === c.name && x.role === c.role && x.context === c.context,
     );
     if (identical.length > 1) {

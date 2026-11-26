@@ -38,6 +38,23 @@ export async function selectOptionChoices(page, within, name, markup) {
         const names = await Promise.all(
             candidates.map((option) => option.evaluate(selectOptionName)),
         );
+        if (name == null) {
+            const enabled = await Promise.all(
+                candidates.map((option) =>
+                    option.evaluate(
+                        (el) =>
+                            !el.closest(
+                                ':disabled,[aria-disabled=true],.ant-select-item-option-disabled,.el-select-dropdown__item.is-disabled,[inert]',
+                            ) && !el.matches('[aria-haspopup=true],[aria-expanded]'),
+                    ),
+                ),
+            );
+            const counts = new Map();
+            for (const label of names) counts.set(label, (counts.get(label) || 0) + 1);
+            return {
+                names: names.filter((label, i) => label && enabled[i] && counts.get(label) === 1),
+            };
+        }
         const matches = candidates.filter((_, index) => names[index] && names[index] === name);
         if ((await options.count()) !== candidates.length) return { count: 0 };
         if (matches.length === 1 && (await matches[0].evaluate(selectOptionName)) === name)

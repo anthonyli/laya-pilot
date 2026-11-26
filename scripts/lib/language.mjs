@@ -114,8 +114,17 @@ export function describe(step) {
         return { verb: 'bindExactRecord', column: m[1], value: m[2] };
     if ((m = step.match(/^展开导航图标「([^」]+)」以显示「([^」]+)」链接$/)))
         return { verb: 'click', target: m[1], recordedRole: 'navIcon', childLink: m[2] };
-    if ((m = step.match(/^展开「([^」]+)」导航菜单$/)))
-        return { verb: 'click', target: m[1], recordedRole: 'namedNavIcon' };
+    if (
+        (m = step.match(
+            /^展开「([^」]+)」导航菜单(?:（图标「([a-zA-Z_][a-zA-Z0-9_-]{0,79})」）)?$/,
+        ))
+    )
+        return {
+            verb: 'click',
+            target: m[1],
+            recordedRole: 'namedNavIcon',
+            ...(m[2] && { iconClass: m[2] }),
+        };
     if ((m = step.match(/^(在弹窗中)?点击操作图标「([^」]+)」$/)))
         return {
             verb: 'click',
@@ -132,6 +141,42 @@ export function describe(step) {
             verb: 'click',
             target: m[2],
             recordedRole: 'fieldSelect',
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if (
+        (m = step.match(
+            /^在(弹窗的)?「([^」]+)」字段下拉框中选择(?:任一可用选项|符合「([^」]+)」的选项)$/,
+        ))
+    )
+        return {
+            verb: 'click',
+            recordedRole: 'fieldOption',
+            field: m[2],
+            optionGoal: m[3] || '',
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if (
+        (m = step.match(
+            /^在(弹窗的)?「([^」]+)」下拉框中选择(?:任一可用选项|符合「([^」]+)」的选项)$/,
+        ))
+    )
+        return {
+            verb: 'select',
+            target: m[2],
+            locator: 'nativeSelect',
+            optionGoal: m[3] || '',
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if (
+        (m = step.match(
+            /^在(弹窗的)?「([^」]+)」字段中输入\s*(-?\d+)\s*到\s*(-?\d+)\s*之间的整数$/,
+        ))
+    )
+        return {
+            verb: 'fill',
+            target: m[2],
+            locator: 'formNumber',
+            range: [Number(m[3]), Number(m[4])],
             ...(m[1] && { scope: 'dialog' }),
         };
     if ((m = step.match(/^在(弹窗的)?「([^」]+)」字段下拉框中点击「([^」]+)」选项$/)))

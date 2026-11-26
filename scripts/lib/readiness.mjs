@@ -3,13 +3,17 @@ import { Halt } from './language.mjs';
 // Wait for the application, not merely the outer document's DOMContentLoaded.
 export async function waitForReady(
     page,
-    { timeout = 18000, minimum = 600, failures = () => [] } = {},
+    { timeout = 18000, minimum = 600, failures = () => [], pauseForRedirect } = {},
 ) {
-    const start = Date.now();
+    let start = Date.now();
     let stableSince = Date.now(),
         previous = '',
         last;
     while (Date.now() - start < timeout) {
+        if (pauseForRedirect && (await pauseForRedirect())) {
+            start = stableSince = Date.now();
+            previous = '';
+        }
         const errors = failures().filter(
             (x) =>
                 x.status >= 500 &&

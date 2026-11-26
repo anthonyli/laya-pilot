@@ -18,7 +18,11 @@ import {
 } from './lib/diagnostics.mjs';
 import { authRoute, findRecordingAuth, rememberRecordingAuth } from './lib/recording-auth.mjs';
 import { openBrowser } from './lib/browser-provider.mjs';
-import { assessNavigationHealth, restoreNavigationDestinations } from './lib/recording-cases.mjs';
+import {
+    assessNavigationHealth,
+    restoreNavigationDestinations,
+    recordedBusinessEntry,
+} from './lib/recording-cases.mjs';
 import {
     loadLocalEnvironment,
     loadProjectConfig,
@@ -34,6 +38,7 @@ import { settle } from './lib/dom.mjs';
 import { dataRoot, venvPython } from './lib/entry.mjs';
 import { RUN_FILES, logFile, uniqueRunDirectory } from './lib/run-layout.mjs';
 import { finalizeRun, writeCaseWorkbook } from './lib/run-index.mjs';
+import { attachReplayLogin, setReplayTraces } from './lib/interactive-replay.mjs';
 import { CaseTraces } from './lib/case-trace.mjs';
 import { inspectCase, compileExpectation } from './lib/case-diagnostics.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
@@ -89,6 +94,7 @@ const config = {
     language: option('--language', 'TEST_LANGUAGE', 'language', 'auto'),
     pageTimeout: Number(arg('--page-timeout', '18000')),
     delay: Number(arg('--delay', '180')),
+    confirmedDelay: Number(arg('--delay', '0')),
     assertTimeout: Number(arg('--assert-timeout', '4000')),
     maxSteps: Number(arg('--max-steps', '25')),
     minProbability: Number(arg('--min-probability', '0.68')),
@@ -201,7 +207,7 @@ async function report(results, laya, source, warnings) {
         md += `\n### ${clean(r.sheet)} / 第${r.row}行 / ${clean(r.id)} ${clean(r.title)}\n\n`;
         md += '|序号|阶段|原文|范围|状态|采集时间|截图|\n|---|---|---|---|---|---|---|\n';
         for (const e of r.evidence)
-            md += `|${e.sequence}|${e.phase === 'step' ? '步骤' : '预期'} ${e.index}|${clean(e.text)}|${clean(e.scope ?? '')}|${clean(e.status)}|${clean(e.at)}|${e.screenshot ? `[截图](${e.screenshot})` : clean(e.screenshot_error || '未采集')}|\n`;
+            md += `|${e.sequence}|${e.phase === 'step' ? '步骤' : '预期'} ${e.index}|${[e.text, ...(e.notes || [])].map(clean).join(' · ')}|${clean(e.scope ?? '')}|${clean(e.status)}|${clean(e.at)}|${e.screenshot ? `[截图](${e.screenshot})` : clean(e.screenshot_error || '未采集')}|\n`;
     }
     const diagnosticsOf = (r) =>
         (r.input_diagnostics || []).filter((d) => d.code !== 'needs-live-target');
@@ -469,6 +475,7 @@ async function main() {
     const recordedAccount = [...accounts][0];
     config.authAccount ||= config.user || recordedAccount;
     const requestedUrl = config.url;
+    config.explicitAuthCheck = config.authCheck;
     const managed =
         !config.authState &&
         !config.authReset &&
@@ -482,16 +489,30 @@ async function main() {
         config.recordedLogin = managed.info;
         config.url = managed.info.landingUrl;
     }
+    const businessEntryFor = (index) =>
+        !flag('--replay-menus') &&
+        recordedBusinessEntry(selected[index], selected[index + 1], config.url);
+    // A workbook with an explicit module path still needs its initial page.
+    const entry = selected
+        .flatMap((c) => lines(c.steps))
+        .find((step) => {
+            const d = describe(step);
+            return d.verb === 'path' && d.path.length > 1;
+        });
     const modelWarmup = beginModelWarmup(laya, config);
     const { browser: opened, context, page, authRestored } = await openBrowser(config);
     browser = opened;
     activePage = page;
+    attachReplayLogin(page, context, config);
     await validateUiAdapterSelectors(page, config.uiAdapters);
     const engine = new Engine(
         page,
         laya,
         config,
-        new BrowserDiagnostics(context, { checkBusinessResponses: true }),
+        new BrowserDiagnostics(context, {
+            checkBusinessResponses: true,
+            paused: () => config.replayLoginActive,
+        }),
     );
     await engine.navigate(config.url);
     const authStatus = await ensureAuthentication(
@@ -502,7 +523,8 @@ async function main() {
         authRestored,
     );
     config.authenticated = authStatus !== 'not-required';
-    if (config.authState) await saveAuthState(context, page, config);
+    if (config.authState && authStatus !== 'interactive')
+        await saveAuthState(context, page, config);
     else if (authStatus === 'logged-in' && (config.authAccount || config.user)) {
         const saved = await rememberRecordingAuth(
             dataRoot,
@@ -513,22 +535,22 @@ async function main() {
         );
         console.log(saved ? 'AUTH 已保存此站点和账号的登录态。' : 'AUTH 未验证到可复用的登录态。');
     }
-    if (config.recordedLogin && authRoute(requestedUrl) !== config.recordedLogin.loginUrl) {
+    if (
+        config.recordedLogin &&
+        new URL(requestedUrl).origin === new URL(config.url).origin &&
+        authRoute(requestedUrl) !== config.recordedLogin.loginUrl
+    ) {
         config.url = requestedUrl;
-        await engine.navigate(config.url);
+        if (!businessEntryFor(0)?.resetAtEntry || (entry && !config.moduleRoutes.size))
+            await engine.navigate(config.url);
     }
     await waitModelWarmup(modelWarmup);
     // Traces start per case, after login: never record login/password entry.
     const traces = new CaseTraces(context, config.out);
+    setReplayTraces(page, traces);
     const results = [];
     // A login portal is not necessarily the module under test. Use only an
     // explicit, full menu path from the selected Excel, never an invented route.
-    const entry = selected
-        .flatMap((c) => lines(c.steps))
-        .find((s) => {
-            const d = describe(s);
-            return d.verb === 'path' && d.path.length > 1;
-        });
     // Mapped workbooks can span modules. Resolve each navigation when its own case reaches it.
     if (entry && !config.moduleRoutes.size) {
         console.log('进入Excel指定模块：' + entry);
@@ -580,6 +602,7 @@ async function main() {
                 { ...c, url: startUrl },
                 {
                     continueRecording: followsPrevious,
+                    businessEntry: businessEntryFor(index),
                     useRecordedStepCount: Boolean(scene?.kind) && !flag('--max-steps'),
                 },
             );
@@ -636,7 +659,9 @@ main().catch(async (e) => {
     console.error('停止：' + errorMessage);
     await fs.mkdir(config.out, { recursive: true }).catch(() => {});
     const screenshot = 'run/startup-failure.png';
-    const captured = await captureFailureScreenshot(activePage, path.join(config.out, screenshot));
+    const captured =
+        !config.replayLoginActive &&
+        (await captureFailureScreenshot(activePage, path.join(config.out, screenshot)));
     // Keep a results.json so readers and index.html can explain why nothing ran.
     const hasResults = await fs.access(path.join(config.out, RUN_FILES.results)).then(
         () => true,
@@ -653,7 +678,10 @@ main().catch(async (e) => {
                         error: {
                             category: e.category || '启动失败',
                             message: errorMessage,
-                            url: activePage ? safeUrl(activePage.url()) : null,
+                            url:
+                                activePage && !config.replayLoginActive
+                                    ? safeUrl(activePage.url())
+                                    : null,
                             screenshot: captured ? screenshot : null,
                         },
                         counts: {},

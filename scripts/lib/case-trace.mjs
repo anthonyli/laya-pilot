@@ -31,6 +31,12 @@ export class CaseTraces {
         }
     }
 
+    async suspend() {
+        if (!this.open) return;
+        await this.bounded(this.tracing.stop());
+        this.open = false;
+    }
+
     /** Start recording the next case. */
     async begin() {
         if (this.open) await this.bounded(this.tracing.stop()).catch(() => {});

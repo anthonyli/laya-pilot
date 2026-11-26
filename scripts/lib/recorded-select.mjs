@@ -65,6 +65,7 @@ export async function recordedSelectOption(
     markup,
     scope = page,
     timeout = 4000,
+    chooseName,
 ) {
     const choices = (within) => selectOptionChoices(page, within, name, markup);
     if (!opener) {
@@ -87,7 +88,7 @@ export async function recordedSelectOption(
         .locator(`:scope :is(${markup.popup},[role=listbox]):not(:scope :is(${markup.item}) *)`)
         .filter({ visible: true });
     const popups = page.locator(markup.popup).filter({ visible: true });
-    const deadline = Date.now() + timeout;
+    let deadline = Date.now() + timeout;
     // Mounting the portal, closing the previous popup and populating virtual options
     // can happen on separate renders. Re-evaluate ownership until the choice exists.
     do {
@@ -113,7 +114,16 @@ export async function recordedSelectOption(
             // A popup belonging to a different form item can still be fading out.
             owner = popups.and(page.locator(`:not(:is(${markup.item}) *)`));
         }
-        if (owner) {
+        if (owner && chooseName && name == null) {
+            const { names } = await selectOptionChoices(page, owner, null, markup);
+            if (names.length) {
+                name = await chooseName(names);
+                deadline = Date.now() + timeout;
+                // Resolve ownership again after the decision. Virtual lists can re-render
+                // or another field can open while a decision is in flight.
+                continue;
+            }
+        } else if (owner) {
             const { target } = await choices(owner);
             if (target) return target;
         }

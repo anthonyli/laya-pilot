@@ -63,6 +63,7 @@ function fromOrdinary(summary) {
             at: e.at,
             screenshot: e.screenshot,
             error: e.screenshot_error,
+            notes: e.notes,
         })),
         assertions: r.assertions || [],
         checks: r.health_checks || [],
@@ -352,6 +353,7 @@ function caseHtml(c) {
             (t) => `<li class="${outcome(t.status)}">
   <div class="step"><span class="badge ${outcome(t.status)}">${escape(t.status || '')}</span>
   <b>${escape(t.label)}</b> ${escape(t.text || '')}${t.at ? ` <small>${escape(clock(t.at))}</small>` : ''}
+  ${(t.notes || []).map((note) => `<div class="note">${escape(note)}</div>`).join('')}
   ${t.error ? `<div class="note">${escape(t.error)}</div>` : ''}</div>
   ${shot(t.screenshot, t.label)}
 </li>`,

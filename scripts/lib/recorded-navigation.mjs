@@ -8,6 +8,32 @@ export function navigationIconSelector(token) {
 }
 
 // These functions are also embedded in standalone Playwright recordings.
+export function readNavigationIconClass(clicked, { navigationScope, iconClassSource }) {
+    if (!clicked?.closest(navigationScope) || getComputedStyle(clicked).cursor !== 'pointer')
+        return null;
+    const visible = (el) =>
+        el.getClientRects().length &&
+        getComputedStyle(el).visibility === 'visible' &&
+        !el.closest('[aria-hidden=true],[inert]');
+    const icon = clicked.closest('svg');
+    const icons = icon ? [icon] : [...clicked.querySelectorAll('svg')].filter(visible);
+    if (icons.length !== 1) return null;
+    const tokenPattern = new RegExp(iconClassSource);
+    const tokens = [...icons[0].classList]
+        .filter(
+            (token) =>
+                tokenPattern.test(token) &&
+                /(?:menu|nav)/i.test(token) &&
+                !/(?:^|[-_])(?:active|hover|selected|disabled|focus)(?:$|[-_])/i.test(token),
+        )
+        .sort((a, b) => b.length - a.length);
+    return tokens.find(
+        (token) =>
+            [...document.querySelectorAll(`${navigationScope} svg.${token}`)].filter(visible)
+                .length === 1,
+    );
+}
+
 export function iconOwner(element) {
     const graphics = 'svg, img, i, [role=img]';
     const icon =
@@ -52,29 +78,76 @@ export function declaredIconName(owner) {
     return name.trim().replace(/\s+/g, ' ');
 }
 
-export async function findNamedIcon(page, scope, name, ownerOf, declaredName, timeout = 8000) {
-    const candidates = scope.locator('svg, img, i, [role=img]').filter({ visible: true });
+export async function findNamedIcon(
+    page,
+    scope,
+    name,
+    ownerOf,
+    declaredName,
+    timeout = 8000,
+    hintSelector,
+    replay = {},
+) {
+    const graphicsSelector = 'svg, img, i, [role=img]';
+    const menuTriggers = 'button,[role=button],[role=menuitem],[aria-haspopup=true]';
+    const candidates = scope
+        .locator(replay.menu ? graphicsSelector + ',' + menuTriggers : graphicsSelector)
+        .filter({ visible: true });
     const tips = page.getByRole('tooltip').filter({ visible: true });
     const deadline = Date.now() + timeout;
 
-    async function scan(graphics) {
+    // Tooltip animations often finish between Playwright's longer retry intervals.
+    async function waitForTips(visible, ms) {
+        const until = Date.now() + ms;
+        while (Boolean(await tips.count()) !== visible && Date.now() < until)
+            await page.waitForTimeout(35);
+    }
+
+    async function readTooltip(owner) {
+        await page.mouse.move(0, 0);
+        await waitForTips(false, 1000);
+        if (await tips.count()) return '';
+        try {
+            await owner.hover({ timeout: 1500 });
+        } catch (error) {
+            if (await owner.evaluate((el) => el.isConnected)) throw error;
+            return '';
+        }
+        await waitForTips(true, 750);
+        return (await tips.count()) === 1
+            ? (await tips.first().innerText()).trim().replace(/\s+/g, ' ')
+            : '';
+    }
+
+    async function nameOf(owner) {
+        const name = await owner.evaluate(declaredName);
+        if (name && !/^(?:icon|图标)\s*[:：]/i.test(name)) return name;
+        return replay.menu ? (await owner.innerText()).trim().replace(/\s+/g, ' ') : '';
+    }
+
+    async function scan(graphics, source) {
         const seen = await page.evaluateHandle(() => new WeakSet());
         const owners = [];
         const matches = [];
+        const alternatives = new Map();
         let result = null;
         let hoverCount = 0;
         try {
             for (const graphic of graphics) {
-                const handle = await graphic.evaluateHandle(ownerOf);
+                const handle =
+                    replay.menu &&
+                    (await graphic.evaluate((el, selectors) => el.matches(selectors), menuTriggers))
+                        ? await graphic.evaluateHandle((el) => el)
+                        : await graphic.evaluateHandle(ownerOf);
                 const owner = handle.asElement();
                 if (
                     !owner ||
                     !(await owner.evaluate(
-                        (el, { seen, globalToolbar }) => {
+                        (el, { seen, globalToolbar, menu }) => {
                             if (
                                 seen.has(el) ||
                                 !el.isConnected ||
-                                el.innerText?.trim() ||
+                                (!menu && el.innerText?.trim()) ||
                                 el.closest('[inert], :disabled, [aria-disabled=true]') ||
                                 (globalToolbar &&
                                     el.closest(
@@ -85,44 +158,39 @@ export async function findNamedIcon(page, scope, name, ownerOf, declaredName, ti
                             seen.add(el);
                             return true;
                         },
-                        { seen, globalToolbar: scope === page },
+                        { seen, globalToolbar: scope === page, menu: replay.menu },
                     ))
                 ) {
                     await handle.dispose();
                     continue;
                 }
                 owners.push(owner);
-                const label = await owner.evaluate(declaredName);
-                if (label === name) {
-                    matches.push(owner);
-                    continue;
+                let label = await nameOf(owner);
+                if (!label) {
+                    if (++hoverCount > 48) throw Error('图标过多，无法在当前范围验证唯一目标。');
+                    label = await readTooltip(owner);
                 }
-                if (label && !/^(?:icon|图标)\s*[:：]/i.test(label)) continue;
-                if (++hoverCount > 48) throw Error('图标过多，无法在当前范围验证唯一目标。');
-                await page.mouse.move(0, 0);
-                await tips
-                    .first()
-                    .waitFor({ state: 'hidden', timeout: 1000 })
-                    .catch(() => {});
-                if (await tips.count()) continue;
-                try {
-                    await owner.hover({ timeout: 1500 });
-                } catch (error) {
-                    if (await owner.evaluate((el) => el.isConnected)) throw error;
-                    continue;
-                }
-                await tips
-                    .first()
-                    .waitFor({ state: 'visible', timeout: 750 })
-                    .catch(() => {});
-                if (
-                    (await tips.count()) === 1 &&
-                    (await tips.first().innerText()).trim().replace(/\s+/g, ' ') === name
-                )
-                    matches.push(owner);
+                if (label === name) matches.push(owner);
+                else if (label && replay.choose && source === candidates)
+                    alternatives.set(label, alternatives.has(label) ? null : owner);
             }
-            // SPA navigation can mount additional entries while their tooltips are being read.
-            if ((await candidates.count()) !== graphics.length) return null;
+            if (source !== candidates && matches.length) {
+                // Hover can swap the SVG for its highlighted variant inside the same button.
+                // Recheck that the recorded class still identifies this owner after pointer leave.
+                await page.mouse.move(0, 0);
+                await source
+                    .first()
+                    .waitFor({ state: 'visible', timeout: 500 })
+                    .catch(() => {});
+                const sameOwner = await source.evaluateAll(
+                    (icons, owner) => icons.length === 1 && owner.contains(icons[0]),
+                    matches[0],
+                );
+                if (!sameOwner) return null;
+            } else if ((await source.count()) !== graphics.length) {
+                // SPA navigation can mount additional entries while tooltips are being read.
+                return null;
+            }
             const live = [];
             for (const match of matches) {
                 if (await match.evaluate((el) => el.isConnected && el.getClientRects().length))
@@ -130,6 +198,31 @@ export async function findNamedIcon(page, scope, name, ownerOf, declaredName, ti
             }
             if (live.length > 1)
                 throw Error(`无法唯一定位图标「${name}」，找到 ${live.length} 个匹配项。`);
+            if (!live.length && source === candidates && replay.choose && !matches.length) {
+                const names = [...alternatives.keys()].filter((key) => alternatives.get(key));
+                if (names.length) {
+                    const selected = await replay.choose(names);
+                    const owner = alternatives.get(selected);
+                    if (
+                        !owner ||
+                        !(await scope
+                            .locator('*')
+                            .evaluateAll(
+                                (els, el) =>
+                                    els.includes(el) &&
+                                    el.getClientRects().length &&
+                                    !el.closest('[inert],:disabled,[aria-disabled=true]'),
+                                owner,
+                            ))
+                    )
+                        throw Error('模型选择的菜单已发生变化。');
+                    let label = await nameOf(owner);
+                    if (!label) label = await readTooltip(owner);
+                    if (label !== selected) throw Error('模型选择的菜单名称已变化。');
+                    live.push(owner);
+                }
+            }
+            if (live.length) replay.onMatch?.(source !== candidates);
             result = live[0] || null;
             return result;
         } finally {
@@ -140,10 +233,18 @@ export async function findNamedIcon(page, scope, name, ownerOf, declaredName, ti
             );
         }
     }
+    const hinted = hintSelector && candidates.and(page.locator(hintSelector));
     for (;;) {
+        if (hinted) {
+            const graphics = await hinted.elementHandles();
+            if (graphics.length === 1) {
+                const match = await scan(graphics, hinted);
+                if (match) return match;
+            } else await Promise.all(graphics.map((graphic) => graphic.dispose()));
+        }
         const graphics = await candidates.elementHandles();
         if (graphics.length) {
-            const match = await scan(graphics);
+            const match = await scan(graphics, candidates);
             if (match) return match;
         }
         const remaining = deadline - Date.now();

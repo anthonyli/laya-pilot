@@ -143,7 +143,7 @@ test('explicit binding requires exact page, unique current control, and unchange
                         return model.choose(...args);
                     },
                 },
-                '导出',
+                '导出报表',
             ),
             (e) => e.category === 'DOM已变化',
         );
@@ -190,7 +190,7 @@ test('explicit binding requires exact page, unique current control, and unchange
                         return model.choose(...args);
                     },
                 },
-                '导出',
+                '导出报表',
             ),
             (e) => e.category === 'DOM已变化',
         );

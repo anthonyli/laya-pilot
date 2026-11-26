@@ -43,6 +43,35 @@ test('Model fallback runs before declaring missing capability and cannot invent 
     );
     assert.equal(calls, 1);
 });
+test('semantic planning grounds differently worded click requests in enabled live controls', async () => {
+    const snapshot = {
+        controls: [
+            { role: 'button', name: 'Add' },
+            { role: 'button', name: 'Delete', disabled: true },
+            { role: 'password', name: 'Account' },
+        ],
+    };
+    const model = {
+        choose: async (_text, criteria) => {
+            assert.equal(criteria['动作1'], '点击Add · button');
+            assert.equal(criteria['动作2'], undefined);
+            return { choice: '动作1', probabilities: { 动作1: 1 }, margin: 1 };
+        },
+    };
+    assert.deepEqual(await semanticStep('请点击新增指标入口', snapshot, model), [
+        { verb: 'click', target: 'Add', role: 'button' },
+    ]);
+    await assert.rejects(
+        semanticStep('检查是否允许点击新增指标入口', snapshot, {
+            choose: async (_text, criteria) => {
+                assert.equal(criteria['动作1'], undefined);
+                return { choice: '停止', probabilities: { 停止: 1 }, margin: 1 };
+            },
+        }),
+        { category: '执行能力不足' },
+    );
+});
+
 test('Approval-state inspection is not approval workflow execution', () => {
     for (const title of [
         '上线待审核状态筛选',

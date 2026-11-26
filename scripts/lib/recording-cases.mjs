@@ -1,4 +1,4 @@
-import { isAreaSwitch, lines, recordedReviewPrefix } from './language.mjs';
+import { describe, isAreaSwitch, lines, recordedReviewPrefix } from './language.mjs';
 import { HEALTH_EXPECTATIONS } from './diagnostics.mjs';
 import { createExpectation } from './recorded-create.mjs';
 import { editorStep } from './recorded-editor.mjs';
@@ -182,7 +182,10 @@ function actionStep(action, row, values, replacements) {
             `${action.target.scope === '弹窗' ? '在弹窗中' : ''}点击标签为「${name}」的按钮`,
         ];
     if (action.target.locator === 'cardTitle') return [`在弹窗中点击标题为「${name}」的卡片`];
-    if (action.target.locator === 'namedNavIcon') return [`展开「${name}」导航菜单`];
+    if (action.target.locator === 'namedNavIcon') {
+        const hint = action.target.iconClass ? `（图标「${action.target.iconClass}」）` : '';
+        return [`展开「${name}」导航菜单${hint}`];
+    }
     if (action.target.locator === 'navIcon')
         return workbookText(action.target.childLink)
             ? [`展开导航图标「${name}」以显示「${action.target.childLink}」链接`]
@@ -463,7 +466,11 @@ function recordedButtonName(step) {
 }
 
 function sceneTrigger(step) {
-    if (step.startsWith('展开导航图标「') || /^展开「.+」导航菜单$/.test(step)) return 'navigate';
+    if (
+        step.startsWith('展开导航图标「') ||
+        /^展开「.+」导航菜单(?:（图标「[^」]+」）)?$/.test(step)
+    )
+        return 'navigate';
     if (/^切换到「.+」区域$|^点击「.+」(?:链接|标签页|菜单项)$/.test(step)) return 'navigate';
     const button =
         recordedButtonName(step) || step.match(/^(?:在弹窗中)?点击操作图标「(.+)」$/)?.[1];
@@ -505,6 +512,105 @@ function navigationDestination(steps, url, origin) {
         destination.url = target;
     if (area) destination.area = area[1] || area[2];
     return destination.url || destination.area ? destination : null;
+}
+
+// Only replace the initial route into a module. Tab switches and later actions
+// are still part of the recorded test, even when a later tab has its own URL.
+function entryPrefix(steps) {
+    if (!navigationSteps(steps) || steps.some((step) => step.startsWith('检查步骤预期：')))
+        return [];
+    const link = steps.findIndex((step) => /^点击「.+」(?:链接|菜单项)$/.test(step));
+    if (link < 0 || steps.slice(0, link).some((step) => !/^打开网址 |^展开/.test(step))) return [];
+    return steps.slice(0, link + 1);
+}
+
+function recordedEntryUrl(value, origin) {
+    const target = workbookUrl(value, origin);
+    if (!target) return null;
+    const url = new URL(target);
+    const keys = [
+        ...url.searchParams.keys(),
+        ...new URLSearchParams(
+            url.hash.includes('?') ? url.hash.split('?').slice(1).join('?') : url.hash.slice(1),
+        ).keys(),
+    ];
+    return keys.some((key) => /token|secret|passw|auth|credential|session|signature/i.test(key))
+        ? null
+        : target;
+}
+
+export function recordedBusinessEntry(c, following, site) {
+    const scene = sceneOf(c),
+        next = following && sceneOf(following);
+    if (
+        scene?.kind !== 'navigate' ||
+        !next ||
+        !['create', 'edit', 'delete', 'search'].includes(next.kind) ||
+        next.previous !== c.id ||
+        next.account !== scene.account ||
+        !URL.canParse(site)
+    )
+        return null;
+    const destination = scene.destination;
+    const automatic = new Set([
+        ...Object.values(HEALTH_EXPECTATIONS),
+        optionalApiExpectation,
+        ...destinationExpectations(destination),
+    ]);
+    if (!destination || lines(c.expected).some((text) => !automatic.has(text))) return null;
+    const steps = lines(c.steps),
+        prefix = entryPrefix(steps);
+    if (!prefix.length) return null;
+    const origin = new URL(site).origin;
+    const saved = scene.menuEntry;
+    if (Object.hasOwn(scene, 'menuEntry') && !saved) return null;
+    if (saved && JSON.stringify(saved.steps) !== JSON.stringify(prefix)) return null;
+    // Older recordings have the destination and dependent business entry, but no per-link URL.
+    if (
+        !saved &&
+        (!next.url ||
+            destination.url !== next.url ||
+            steps
+                .slice(prefix.length)
+                .some((step) => !/^切换到「.+」区域$|^点击「.+」标签页$/.test(step)))
+    )
+        return null;
+    const url = recordedEntryUrl(saved ? saved.url : next.url, origin);
+    if (!url) return null;
+    if (
+        !saved &&
+        [
+            scene.url,
+            ...prefix.filter((step) => step.startsWith('打开网址 ')).map((step) => step.slice(5)),
+        ].includes(url)
+    )
+        return null;
+    const first = steps[prefix.length] || lines(following.steps)[0];
+    if (!first) return null;
+    const nextControl = describe(first);
+    const anchor = nextControl.target;
+    const roles =
+        nextControl.recordedRole === 'area' || /」标签页$/.test(first)
+            ? ['tab', 'button', 'link', 'menuitem']
+            : nextControl.recordedRole === 'link'
+              ? ['link']
+              : /」菜单项$/.test(first)
+                ? ['menuitem', 'link', 'button']
+                : nextControl.verb === 'click' && /」按钮$/.test(first)
+                  ? ['button']
+                  : ['fill', 'clear'].includes(nextControl.verb)
+                    ? ['textbox', 'spinbutton', 'combobox']
+                    : nextControl.verb === 'select'
+                      ? ['combobox']
+                      : [];
+    if (!roles.length || !anchor || anchor.includes('${')) return null;
+    // An unedited navigation scene has no setup to evaluate on its source page.
+    // Custom scopes and preconditions still start on the recorded source.
+    const resetAtEntry =
+        c.title === sceneNames.navigate &&
+        !lines(c.preconditions).length &&
+        !steps.some((step) => step.startsWith('切换') && step.includes('/'));
+    return { url, prefix, anchor, roles, resetAtEntry };
 }
 
 function destinationExpectations(destination) {
@@ -855,6 +961,18 @@ export function recordedScenarios(
                       : null;
             destination = navigationDestination(steps, observed, new URL(url).origin);
             if (destination) scene.destination = { ...destination, automaticApi: health.at(-1) };
+            const prefix = entryPrefix(steps);
+            if (prefix.length) {
+                const link = entries[prefix.length - 1].action;
+                const from = link?.before?.url;
+                const after = [
+                    link?.after?.url,
+                    entries[prefix.length]?.action?.before?.url,
+                    ...(prefix.length === entries.length ? [following?.before?.url] : []),
+                ].find((value) => value && value !== from);
+                const target = from && recordedEntryUrl(after, new URL(url).origin);
+                scene.menuEntry = target ? { steps: prefix, url: target } : null;
+            }
         }
         return {
             id,

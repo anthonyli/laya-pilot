@@ -42,7 +42,7 @@ test('recorded form steps target the open Ant drawer across legacy and role-base
 test('records a portal tooltip as a menu name and binds repeated action icons to the clicked row', async (t) => {
     const svg = '<svg width="24" height="24"><rect width="24" height="24"/></svg>';
     const html = `<style>nav div,td span{display:inline-block;cursor:pointer} [role=tooltip]{pointer-events:none}</style>
-        <nav><div data-tip="Overview">${svg}</div><div data-tip="Indicator Center">${svg}</div>
+        <nav><div data-tip="Overview">${svg}</div><div data-tip="Indicator Center">${svg.replace('<svg ', '<svg class="menu-indicators" ')}</div>
         <a href="#list" hidden>Realtime Indicator</a></nav><button>Realtime</button>
         <table><thead><tr><th>ID</th><th>Actions</th></tr></thead><tbody>
         ${['First', 'Second'].map((id) => `<tr><td>${id}</td><td><span title="Delete">${svg}</span></td></tr>`).join('')}
@@ -50,6 +50,11 @@ test('records a portal tooltip as a menu name and binds repeated action icons to
         for(const item of document.querySelectorAll('[data-tip]')){
           item.onpointerenter=()=>{const tip=document.createElement('div');tip.setAttribute('role','tooltip');tip.textContent=item.dataset.tip;document.body.append(tip)};
           item.onpointerleave=()=>document.querySelector('[role=tooltip]')?.remove();
+          if(item.dataset.tip==='Indicator Center'){
+            const svg=item.querySelector('svg');
+            item.addEventListener('pointerenter',()=>svg.setAttribute('class','highlighted'));
+            item.addEventListener('pointerleave',()=>svg.setAttribute('class','menu-indicators'));
+          }
           item.onclick=()=>{if(item.dataset.tip==='Indicator Center')document.querySelector('a').hidden=false};
         }
         for(const item of document.querySelectorAll('td span')) item.onclick=()=>{document.body.dataset.clicked=item.closest('tr').cells[0].textContent};
@@ -84,7 +89,8 @@ test('records a portal tooltip as a menu name and binds repeated action icons to
     assert.deepEqual(recording.pages, [url, url + '#list']);
     assert.deepEqual(generateRecordedCases(recording, { splitCases: true }).pages, recording.pages);
     const steps = generateRecordedCases(recording).cases.flatMap((entry) => lines(entry.steps));
-    assert.ok(steps.includes('展开「Indicator Center」导航菜单'));
+    const hintedMenu = '展开「Indicator Center」导航菜单（图标「menu-indicators」）';
+    assert.ok(steps.includes(hintedMenu));
     const bind = '在「ID」列中定位值为「Second」的唯一记录';
     assert.deepEqual(steps.slice(-2), [bind, '点击操作图标「Delete」']);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-icon-recording-'));
@@ -108,6 +114,17 @@ test('records a portal tooltip as a menu name and binds repeated action icons to
     };
     const engine = new Engine(page, null, config);
     await assert.rejects(engine.step('点击「Realtime Indicator」链接'), /无法唯一定位/);
+    await page
+        .locator('[data-tip="Overview"]')
+        .evaluate((el) => el.addEventListener('pointerenter', () => (el.dataset.probed = 'yes')));
+    await engine.step(hintedMenu);
+    assert.equal(await page.locator('[data-tip="Overview"]').getAttribute('data-probed'), null);
+    await page.reload();
+    await page
+        .locator('[data-tip="Overview"] svg')
+        .evaluate((el) => el.setAttribute('class', 'moved-menu'));
+    await engine.step('展开「Indicator Center」导航菜单（图标「moved-menu」）');
+    await page.reload();
     await engine.step('展开「Indicator Center」导航菜单');
     await engine.step('点击「Realtime Indicator」链接');
     await engine.step(bind);

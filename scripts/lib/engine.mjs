@@ -1,3 +1,11 @@
+import {
+    awaitReplayLogin,
+    navigateReplayPage,
+    pauseForReplayRedirect,
+    runReplayOperation,
+} from './interactive-replay.mjs';
+import { randomInt } from 'node:crypto';
+import { resolveNavigationMenu } from './replay-navigation.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { moduleRouteFor } from './project-config.mjs';
@@ -6,15 +14,23 @@ import { resolveUiAdapters } from './ui-adapters.mjs';
 import { replayEditorOperation } from './recorded-editor.mjs';
 import {
     clickRecordedSelectTrigger,
-    recordedFormItem,
     recordedSelectOption,
-    recordedSelectSearch,
-    recordedSelectTrigger,
     selectSelectors,
 } from './recorded-select.mjs';
+import {
+    chooseReplayName,
+    chooseNativeOption,
+    committedSelection,
+    replayInteger,
+    resolveReplayField,
+    stillMatched,
+} from './replay-fields.mjs';
 import { addCreateVerification } from './recording-cases.mjs';
 import {
     createExpectation,
+    saveConfirmationButton,
+    cancelConfirmationButton,
+    needsSaveFollowup,
     readCreateState,
     compareCreateStates,
     verifyCreateClick,
@@ -174,7 +190,8 @@ export class Engine {
         this.laya = laya;
         this.config = config;
         this.ui = resolveUiAdapters(config.uiAdapters);
-        this.selectMarkup = selectSelectors(this.ui);
+        this.selectMarkup = { ...selectSelectors(this.ui), dialog: this.ui.dialog };
+        this.fieldMatches = new Map();
         this.diagnostics = diagnostics;
         configureControlBindings(page, config.controlBindings);
         this.events = [];
@@ -188,7 +205,7 @@ export class Engine {
         this.dirtyAreas = new Map();
         this.caseDirectories = new CaseDirectories();
         page.on('response', (r) => {
-            if (r.status() >= 400) {
+            if (!config.replayLoginActive && r.status() >= 400) {
                 const u = new URL(r.url());
                 this.failures.push({
                     case: this.current?.key,
@@ -228,11 +245,75 @@ export class Engine {
     }
     async exactDialog() {
         const dialog = this.page.locator(this.ui.dialog).filter({ visible: true });
-        if ((await dialog.count()) !== 1)
-            throw new Halt('弹窗操作范围不明确', '当前页面没有唯一可见的目标弹窗');
-        return dialog;
+        const count = await dialog.count();
+        if (count === 1) return dialog;
+        if (count === 0) {
+            await dialog
+                .first()
+                .waitFor({ state: 'visible', timeout: this.config.assertTimeout ?? 4000 })
+                .catch(() => {});
+            if ((await dialog.count()) === 1) return dialog;
+        }
+        throw new Halt('弹窗操作范围不明确', '当前页面没有唯一可见的目标弹窗');
     }
-    async directClick(name, step, ordinal, scope, recordedRole, field) {
+    async replayField(scope, requested, kind) {
+        const key = JSON.stringify([kind, requested]);
+        const previous = this.fieldMatches.get(key);
+        const field = await resolveReplayField(
+            scope,
+            this.page,
+            requested,
+            kind,
+            this.selectMarkup,
+            this.laya,
+            this.config,
+            { case: this.current?.key, step: this.actions },
+            previous,
+        );
+        if (!field.reused && previous) {
+            this.fieldMatches.delete(key);
+            await previous.handle.dispose();
+        }
+        if (field.matched) {
+            field.kind = kind;
+            this.fieldMatches.set(key, field);
+            this.noteFieldMatch(requested, field.name);
+        }
+        return field;
+    }
+    noteFieldMatch(from, to) {
+        this.events.push({
+            phase: this.phase,
+            action: 'field-match',
+            from,
+            to,
+            note: `Laya 字段匹配：${from} → ${to}`,
+        });
+    }
+    async chooseOption(field, goal, names) {
+        if (!goal) return names[randomInt(names.length)];
+        return chooseReplayName(this.laya, `选择${goal}的选项`, names, this.config, {
+            case: this.current?.key,
+            step: this.actions,
+            phase: 'dynamic-option',
+            field,
+            goal,
+        });
+    }
+    noteOption(field, goal, value) {
+        this.events.push({
+            phase: this.phase,
+            action: 'dynamic-option',
+            field,
+            value,
+            note: `动态选值：${field} → ${value}（${goal || '任一可用选项'}）`,
+        });
+    }
+    async directClick(
+        name,
+        step,
+        { ordinal, scope, recordedRole, field, iconClass, role, optionGoal, nextLink } = {},
+    ) {
         let found;
         if (scope === 'dialog' || this.exactRecord || recordedRole) {
             let container = this.page;
@@ -252,7 +333,7 @@ export class Engine {
                 container = this.page.locator(`[data-row-key=${escaped}]`);
                 location = '目标记录';
             }
-            const actual = recordedRole === 'navIcon' ? name : this.config.labels?.[name] || name;
+            let actual = recordedRole === 'navIcon' ? name : this.config.labels?.[name] || name;
             const options = { name: actual, exact: true };
             let roles = ['button', 'link', 'menuitem'];
             if (recordedRole === 'link' || recordedRole === 'option') roles = [recordedRole];
@@ -261,31 +342,48 @@ export class Engine {
                     ? ['tab', ...roles]
                     : ['tab'];
             const timeout = this.config.assertTimeout || 4000;
-            let locator;
+            let locator, opener, navigation;
             try {
                 if (recordedRole === 'fieldSelect' || recordedRole === 'fieldOption') {
-                    const fieldName = field ? this.config.labels?.[field] || field : actual;
-                    const opener = recordedSelectTrigger(
-                        container,
-                        this.page,
-                        fieldName,
-                        this.selectMarkup,
-                    );
+                    const resolved = await this.replayField(container, field || name, 'select');
+                    opener = resolved.locator;
                     await opener.waitFor({ state: 'visible', timeout });
-                    locator =
-                        recordedRole === 'fieldSelect'
-                            ? opener
-                            : await recordedSelectOption(
-                                  this.page,
-                                  actual,
-                                  opener,
-                                  this.selectMarkup,
-                                  container,
-                                  timeout,
-                              );
-                    if (recordedRole === 'fieldOption')
+                    if (recordedRole === 'fieldSelect') {
+                        actual = resolved.name;
+                        locator = opener;
+                    } else {
+                        const chooseName =
+                            optionGoal === undefined
+                                ? undefined
+                                : async (names) => {
+                                      actual = await this.chooseOption(
+                                          resolved.name,
+                                          optionGoal,
+                                          names,
+                                      );
+                                      return actual;
+                                  };
+                        locator = await recordedSelectOption(
+                            this.page,
+                            chooseName ? null : actual,
+                            opener,
+                            this.selectMarkup,
+                            container,
+                            timeout,
+                            chooseName,
+                        );
                         await locator.waitForElementState('visible', { timeout });
-                    else await locator.waitFor({ state: 'visible', timeout });
+                        if (
+                            !(await locator.isEnabled()) ||
+                            (await locator.evaluate(
+                                (el) =>
+                                    !!el.closest(
+                                        '[aria-disabled=true],:disabled,.is-disabled,.ant-select-item-option-disabled',
+                                    ),
+                            ))
+                        )
+                            throw new Halt('控件不可用', `选项「${actual}」已禁用。`);
+                    }
                 } else if (recordedRole === 'option') {
                     locator = await recordedSelectOption(
                         this.page,
@@ -302,9 +400,28 @@ export class Engine {
                     await locator.waitFor({ state: 'visible', timeout });
                 } else if (recordedRole === 'cardTitle') {
                     locator = await findDialogCard(container, actual, this.ui.cardTitle);
-                } else if (['namedNavIcon', 'namedIcon'].includes(recordedRole)) {
-                    if (recordedRole === 'namedNavIcon')
-                        container = container.locator(navigationScope);
+                } else if (recordedRole === 'namedNavIcon') {
+                    navigation = await resolveNavigationMenu(
+                        this.page,
+                        container.locator(navigationScope),
+                        actual,
+                        iconClass,
+                        this.config,
+                        this.laya,
+                        { case: this.current?.key, step: this.actions },
+                    );
+                    ({ locator, actual } = navigation);
+                    this.events.push({
+                        phase: this.phase,
+                        action: 'navigation-target',
+                        from: name,
+                        to: actual,
+                        strategy: navigation.strategy,
+                        ...(navigation.strategy === 'model' && {
+                            note: `Laya 菜单匹配：${name} → ${actual}`,
+                        }),
+                    });
+                } else if (recordedRole === 'namedIcon') {
                     locator = await findNamedIcon(
                         this.page,
                         container,
@@ -312,6 +429,7 @@ export class Engine {
                         iconOwner,
                         declaredIconName,
                         timeout,
+                        iconClass && navigationIconSelector(iconClass),
                     );
                 } else {
                     locator = (
@@ -323,17 +441,31 @@ export class Engine {
                     ).filter({ visible: true });
                     await locator.waitFor({ state: 'visible', timeout });
                 }
-            } catch {
+            } catch (error) {
                 if (recordedRole === 'fieldOption' || recordedRole === 'option')
                     await locator?.dispose();
+                if (error instanceof Halt) throw error;
                 throw new Halt(
                     (this.exactRecord ? '记录' : scope === 'dialog' ? '弹窗' : '页面') +
                         '操作范围不明确',
-                    `${location}内无法唯一定位「${name}」`,
+                    optionGoal !== undefined
+                        ? `${location}的「${field}」下拉框无法唯一定位可用选项`
+                        : `${location}内无法唯一定位「${name}」`,
                 );
             }
             found = {
                 locator,
+                opener,
+                nextLink:
+                    navigation && nextLink
+                        ? container
+                              .locator(navigationScope)
+                              .getByRole('link', { name: nextLink, exact: true })
+                              .filter({ visible: true })
+                        : null,
+                decision: navigation?.strategy === 'model',
+                optionGoal,
+                field,
                 control: {
                     name: actual,
                     role: ['navIcon', 'namedNavIcon'].includes(recordedRole)
@@ -356,7 +488,12 @@ export class Engine {
         } else {
             if (!ordinal) await this.revealRowMenu(name);
             const rowKey = ordinal ? undefined : await this.targetRow(name);
-            found = await this.chooseTarget(name, 'click', { rowKey, ordinal });
+            found = await this.chooseTarget(name, 'click', {
+                rowKey,
+                ordinal,
+                instruction: step,
+                role: role || (/「[^」]+」按钮$/.test(step) ? 'button' : undefined),
+            });
         }
         return this.clickTarget(found, step, recordedRole);
     }
@@ -373,17 +510,81 @@ export class Engine {
                 if (!this.config.origins.includes(u.origin))
                     throw new Halt('目标地址超出测试范围', '链接不属于本次配置的测试站点。');
             }
-            console.log('  Laya → ' + found.control.name + ' [' + found.control.role + ']');
+            console.log(
+                (found.decision ? '  Laya → ' : '  直接定位 → ') +
+                    found.control.name +
+                    ' [' +
+                    found.control.role +
+                    ']',
+            );
             this.navFailureStart = this.failures.length;
+            const previousLabel =
+                recordedRole === 'fieldOption'
+                    ? await found.opener.innerText({ timeout: 250 }).catch(() => undefined)
+                    : undefined;
+            const opensLink = found.nextLink && (await found.nextLink.count()) === 0;
             if (recordedRole === 'fieldSelect')
                 await clickRecordedSelectTrigger(found.locator, this.selectMarkup);
             else await found.locator.click();
             this.exactRecord = null;
-            await settle(this.page, this.config.delay);
-            await this.ready();
+            // Confirmed controls can proceed as soon as the UI acknowledges the action.
+            // Keep the configured pacing for explicit --delay and opaque controls.
+            const state = async () => {
+                if (opensLink && (await found.nextLink.count()) === 1) return 'matched';
+                if (recordedRole === 'fieldOption')
+                    return found.opener
+                        .evaluate(
+                            committedSelection,
+                            { value: found.control.name, before: previousLabel },
+                            { timeout: 250 },
+                        )
+                        .catch(() => 'unknown');
+                if (recordedRole !== 'area' && recordedRole !== 'fieldSelect') return 'unknown';
+                const active = await found.locator
+                    .evaluate(
+                        (el, role) =>
+                            role === 'area'
+                                ? el.getAttribute('aria-selected') === 'true'
+                                : el.matches('[aria-expanded=true]') ||
+                                  !!el.querySelector('[role=combobox][aria-expanded=true]'),
+                        recordedRole,
+                        { timeout: 250 },
+                    )
+                    .catch(() => false);
+                return active ? 'matched' : 'unknown';
+            };
+            const delay =
+                (await state()) === 'matched'
+                    ? (this.config.confirmedDelay ?? this.config.delay)
+                    : this.config.delay;
+            await settle(this.page, delay);
+            let selected = await state();
+            if (recordedRole === 'fieldOption') {
+                if (selected !== 'matched') {
+                    await this.ready();
+                    selected = await state();
+                    if (
+                        selected === 'different' ||
+                        (found.optionGoal !== undefined && selected !== 'matched')
+                    ) {
+                        const until = Date.now() + (this.config.assertTimeout ?? 4000);
+                        while (selected !== 'matched' && Date.now() < until) {
+                            await this.page.waitForTimeout(50);
+                            selected = await state();
+                        }
+                        if (selected !== 'matched')
+                            throw new Halt(
+                                '选值未确认',
+                                `「${found.field}」未确认选中「${found.control.name}」。`,
+                            );
+                    }
+                } else await this.ready(0);
+                if (found.optionGoal !== undefined)
+                    this.noteOption(found.field, found.optionGoal, found.control.name);
+            } else await this.ready(selected === 'matched' ? 0 : undefined);
             return found.control;
         } finally {
-            if (recordedRole === 'fieldOption' || recordedRole === 'option')
+            if (['fieldOption', 'option', 'namedIcon', 'namedNavIcon'].includes(recordedRole))
                 await found.locator.dispose();
         }
     }
@@ -505,13 +706,15 @@ export class Engine {
         console.log('  绑定记录：' + chosen.context.slice(0, 100));
         await discoverRowLabels(this.page, this.rowKey);
     }
-    async ready() {
+    async ready(minimum, timeout = this.config.pageTimeout || 18000) {
         return waitForReady(this.page, {
-            timeout: this.config.pageTimeout || 18000,
+            minimum,
+            timeout,
             failures: () => this.failures.slice(this.navFailureStart),
+            pauseForRedirect: () => pauseForReplayRedirect(this.page),
         });
     }
-    async navigate(url, { force = false } = {}) {
+    async navigate(url, { force = false, minimum, readyTimeout } = {}) {
         const u = new URL(url, this.config.url);
         if (!['http:', 'https:'].includes(u.protocol) || !this.config.origins.includes(u.origin))
             throw new Halt('目标地址超出测试范围', '步骤网址必须属于本次测试站点');
@@ -519,9 +722,9 @@ export class Engine {
         if (changed) {
             this.navFailureStart = this.failures.length;
             this.navigationCount++;
-            await this.page.goto(u.href, { waitUntil: 'domcontentloaded' });
+            await navigateReplayPage(this.page, u.href);
         }
-        await this.ready();
+        await this.ready(minimum, readyTimeout);
         return changed;
     }
     async showArea(name) {
@@ -718,7 +921,32 @@ export class Engine {
             throw error;
         }
     }
-    async step(text) {
+    async step(text, nextText = '') {
+        await awaitReplayLogin(this.page);
+        const previousSave = this.verifiedCreate;
+        this.verifiedCreate = null;
+        const dialogButton = /^在弹窗中点击「([^」]+)」按钮$/;
+        const followup = previousSave && text.match(dialogButton)?.[1];
+        if (
+            followup &&
+            saveConfirmationButton.test(followup) &&
+            !(await needsSaveFollowup(
+                this.page,
+                this.ui.dialog,
+                this.config.labels?.[followup] || followup,
+                previousSave.autoConfirmed,
+            ))
+        ) {
+            this.events.push({
+                phase: this.phase,
+                text,
+                action: 'save-confirmation',
+                reason: previousSave.autoConfirmed
+                    ? '已在保存时确认。'
+                    : '直接保存成功，未出现确认框。',
+            });
+            return;
+        }
         const diagnosis = stepDiagnostic(text);
         if (diagnosis.status === 'needs-review')
             throw new Halt('录制步骤待补录', diagnosis.message + '；' + diagnosis.suggestion);
@@ -736,9 +964,26 @@ export class Engine {
                 minProbability: this.config.minProbability,
                 minMargin: this.config.minMargin,
             });
-        for (const spec of specs) await this.executeStep(text, spec);
+        for (const spec of specs) {
+            const uncertain = !['assertStep', 'bindRow', 'bindExactRecord', 'hover'].includes(
+                spec.verb,
+            );
+            await runReplayOperation(
+                this.page,
+                text,
+                uncertain,
+                () => this.executeStep(text, spec, nextText),
+                () =>
+                    this.events.push({
+                        phase: this.phase,
+                        text,
+                        action: 'operator-confirmed',
+                        note: '重新登录后由操作者确认上一步已完成。',
+                    }),
+            );
+        }
     }
-    async executeStep(text, spec) {
+    async executeStep(text, spec, nextText = '') {
         const limit = this.caseStepLimit ?? this.config.maxSteps;
         if (++this.actions > limit)
             throw new Halt('达到步骤上限', `本用例达到最大操作次数（${limit}），停止继续尝试`);
@@ -881,15 +1126,11 @@ export class Engine {
             await settle(this.page, this.config.delay);
         } else if (verb === 'click') {
             if (!this.rowKey && /列表(?:中)?点击/.test(text)) await this.bindRow(text);
+            const nextLink =
+                spec.recordedRole === 'namedNavIcon' &&
+                nextText.match(/^点击「([^」]+)」链接$/)?.[1];
             const click = () =>
-                this.directClick(
-                    spec.target,
-                    text,
-                    spec.ordinal,
-                    spec.scope,
-                    spec.recordedRole,
-                    spec.field,
-                );
+                this.directClick(spec.target, text, nextLink ? { ...spec, nextLink } : spec);
             if (spec.verifyCreate) {
                 const result = await verifyCreateClick(
                     this.page,
@@ -900,6 +1141,10 @@ export class Engine {
                     compareCreateStates,
                     this.ui,
                     this.config.assertTimeout || 5000,
+                    Boolean(this.config.allowWrite) &&
+                        !cancelConfirmationButton.test(
+                            nextText.match(/^(?:在弹窗中)?点击「([^」]+)」按钮$/)?.[1] || '',
+                        ),
                 );
                 this.events.push({
                     phase: this.phase,
@@ -913,6 +1158,7 @@ export class Engine {
                     error.createResult = result;
                     throw error;
                 }
+                this.verifiedCreate = result;
             } else control = await click();
             if (spec.recordedRole === 'navIcon') {
                 await this.page
@@ -928,62 +1174,68 @@ export class Engine {
                 this.dirtyAreas.set(JSON.stringify(area), area);
             }
             let found;
-            if (spec.locator === 'selectSearch') {
-                let container = spec.scope === 'dialog' ? await this.exactDialog() : this.page;
+            const fieldKind =
+                { nativeSelect: 'native', selectSearch: 'search', formNumber: 'number' }[
+                    spec.locator
+                ] || (spec.scope === 'dialog' && ['fill', 'clear'].includes(verb) ? 'text' : null);
+            if (fieldKind) {
+                let scope = spec.scope === 'dialog' ? await this.exactDialog() : this.page;
                 if (this.exactRecord) {
                     const { row, reason } = await exactRecordRow(this.page, this.exactRecord);
                     if (!row) throw new Halt('无法唯一定位记录', reason);
-                    container = row;
+                    scope = row;
                     this.exactRecord = null;
                 }
-                const name = this.config.labels?.[spec.target] || spec.target;
-                const locator = recordedSelectSearch(container, this.page, name, this.selectMarkup);
+                const { name, locator } = await this.replayField(scope, spec.target, fieldKind);
                 if ((await locator.count()) !== 1)
                     throw new Halt(
-                        '字段操作范围不明确',
-                        `无法唯一定位「${name}」下拉框的搜索输入框`,
+                        spec.scope === 'dialog' ? '弹窗操作范围不明确' : '字段操作范围不明确',
+                        `无法唯一定位字段「${name}」`,
                     );
-                found = { locator, control: { name, role: 'combobox' } };
-            } else if (spec.locator === 'formNumber') {
-                const container = spec.scope === 'dialog' ? await this.exactDialog() : this.page;
-                const item = recordedFormItem(container, this.page, spec.target, this.selectMarkup);
-                const locator = item
-                    .locator('input[type=number],input[role=spinbutton]')
-                    .filter({ visible: true });
-                if ((await item.count()) !== 1 || (await locator.count()) !== 1)
-                    throw new Halt(
-                        '字段操作范围不明确',
-                        `无法唯一定位「${spec.target}」字段的数值输入框`,
-                    );
-                found = { locator, control: { name: spec.target, role: 'spinbutton' } };
-            } else if (spec.scope === 'dialog') {
-                const dialog = await this.exactDialog();
-                const name = this.config.labels?.[spec.target] || spec.target;
-                const options = { name, exact: true };
-                const locator = dialog
-                    .getByRole('textbox', options)
-                    .or(dialog.getByRole('spinbutton', options))
-                    .or(dialog.getByLabel(name, { exact: true }))
-                    .or(dialog.getByPlaceholder(name, { exact: true }))
-                    .and(this.page.locator('input:not([type="hidden"],[type="password"]),textarea'))
-                    .filter({ visible: true });
-                if ((await locator.count()) !== 1)
-                    throw new Halt('弹窗操作范围不明确', `目标弹窗内无法唯一定位输入框「${name}」`);
-                found = { locator, control: { name, role: 'textbox', context: '弹窗' } };
+                const role = {
+                    native: 'combobox',
+                    search: 'combobox',
+                    number: 'spinbutton',
+                    text: 'textbox',
+                }[fieldKind];
+                found = {
+                    locator,
+                    control: { name, role, ...(fieldKind === 'native' && { tag: 'select' }) },
+                };
             } else {
                 found = await this.chooseTarget(spec.target, verb, {
-                    value: spec.value,
+                    role: spec.role,
                     rowKey: await this.targetRow(spec.target),
                     allowDisabled: verb === 'hover',
                 });
             }
             control = found.control;
+            if (
+                ['fill', 'clear', 'select'].includes(verb) &&
+                found.decision &&
+                found.control.name !== (this.config.labels?.[spec.target] || spec.target)
+            )
+                this.noteFieldMatch(spec.target, found.control.name);
             if (verb === 'fill' || verb === 'clear') {
+                if (spec.range) spec.value = await replayInteger(found.locator, spec.range);
                 await found.locator.fill(verb === 'clear' ? '' : spec.value);
                 if ((await found.locator.inputValue()) !== (verb === 'clear' ? '' : spec.value))
                     throw new Halt('操作未生效', '填写后的实际输入值不一致');
+                if (spec.range)
+                    this.events.push({
+                        phase: this.phase,
+                        action: 'dynamic-fill',
+                        field: spec.target,
+                        value: spec.value,
+                        note: `动态填值：${spec.target} → ${spec.value}（${spec.range.join(' 到 ')}）`,
+                    });
             } else if (verb === 'select') {
-                if (control.tag === 'select')
+                if (spec.optionGoal !== undefined) {
+                    const value = await chooseNativeOption(found.locator, (names) =>
+                        this.chooseOption(control.name, spec.optionGoal, names),
+                    );
+                    this.noteOption(spec.target, spec.optionGoal, value);
+                } else if (control.tag === 'select')
                     await found.locator.selectOption({ label: spec.value });
                 else {
                     await found.locator.click();
@@ -996,7 +1248,11 @@ export class Engine {
                     await found.locator.setChecked(verb === 'check');
                 else if (control.checked !== (verb === 'check')) await found.locator.click();
             } else if (verb === 'hover') await found.locator.hover();
-            await settle(this.page, this.config.delay);
+            const filled = verb === 'fill' || verb === 'clear';
+            await settle(
+                this.page,
+                filled ? (this.config.confirmedDelay ?? this.config.delay) : this.config.delay,
+            );
         }
         const event = {
             phase: this.phase,
@@ -1261,9 +1517,25 @@ export class Engine {
             actual = page.url();
             passed = actual.includes(spec.target);
         } else {
-            const found = await assertionTarget(page, spec.target, spec.kind, {
-                rowKey: await this.targetRow(spec.target),
-            });
+            let adapted;
+            if (['value', 'empty'].includes(spec.kind)) {
+                const matches = [...this.fieldMatches.values()].filter(
+                    (f) =>
+                        f.requested === spec.target &&
+                        ['text', 'number', 'search'].includes(f.kind),
+                );
+                if (
+                    matches.length === 1 &&
+                    !(await matches[0].original.count()) &&
+                    (await stillMatched(matches[0].locator, matches[0].handle))
+                )
+                    adapted = matches[0];
+            }
+            const found =
+                adapted ||
+                (await assertionTarget(page, spec.target, spec.kind, {
+                    rowKey: await this.targetRow(spec.target),
+                }));
             if (['value', 'empty'].includes(spec.kind)) {
                 actual = await found.locator.inputValue();
                 passed = actual === (spec.kind === 'empty' ? '' : spec.value);
@@ -1287,7 +1559,68 @@ export class Engine {
             reason: passed ? '明确断言满足' : '实际页面状态与该预期不符，需核对需求或定位证据',
         };
     }
-    async runCase(c, { continueRecording = false, useRecordedStepCount = false } = {}) {
+    async enterRecordedPage(entry, resetUrl) {
+        const source = this.page.url();
+        try {
+            await this.navigate(entry.url, {
+                force: Boolean(resetUrl),
+                minimum: 0,
+                readyTimeout: Math.min(
+                    this.config.pageTimeout || 18000,
+                    this.config.assertTimeout || 4000,
+                ),
+            });
+            const check = await verifyRecordedDestination(
+                this.page,
+                '',
+                { kind: 'navigation-url', target: entry.url },
+                this.config.assertTimeout ?? 4000,
+            );
+            if (check.status !== '通过') throw Error('目的地址与录制不一致');
+            const arrived = this.page.url();
+            const deadline = Date.now() + (this.config.assertTimeout ?? 4000);
+            do {
+                const { controls } = await observe(this.page);
+                const targets = controls.filter(
+                    (c) => c.name === entry.anchor && entry.roles.includes(c.role),
+                );
+                if (
+                    targets.length === 1 &&
+                    !targets[0].disabled &&
+                    this.page.url() === arrived &&
+                    !controls.some((c) => c.role === 'password')
+                ) {
+                    if (resetUrl) this.dirtyAreas.clear();
+                    this.actions++;
+                    this.events.push({
+                        phase: this.phase,
+                        action: 'direct-entry',
+                        url: entry.url,
+                        note: `业务入口已核实：${entry.anchor}。原录制的 ${entry.prefix.length} 个进页步骤由 URL 直达。`,
+                    });
+                    return true;
+                }
+                await this.page.waitForTimeout(75);
+            } while (Date.now() < deadline);
+            throw Error('无法确认入口控件「' + entry.anchor + '」');
+        } catch (error) {
+            this.events.push({
+                phase: this.phase,
+                action: 'entry-fallback',
+                note: `直达未确认，改走录制菜单：${safeText(error.message)}`,
+            });
+            if (resetUrl) {
+                const phase = this.phase;
+                await this.resetCase(resetUrl, { force: true });
+                this.phase = phase;
+            } else if (this.page.url() !== source) await this.navigate(source);
+            return false;
+        }
+    }
+    async runCase(
+        c,
+        { continueRecording = false, useRecordedStepCount = false, businessEntry } = {},
+    ) {
         this.current = c;
         this.actions = 0;
         this.caseStepLimit = useRecordedStepCount
@@ -1328,6 +1661,7 @@ export class Engine {
                 at: new Date().toISOString(),
             };
             result.evidence.push(evidence);
+            if (this.config.replayLoginActive) return evidence.sequence;
             const label = { step: '步骤', assertion: '预期' }[evidence.phase] || evidence.phase;
             // e.g. 03-预期2-失败.png: order, phase and outcome are visible in the folder listing.
             const outcome = evidence.status ? `-${slug(evidence.status, 8)}` : '';
@@ -1382,16 +1716,28 @@ export class Engine {
             healthExpected = expected.filter((text) => healthAssertions.has(text));
             if (healthExpected.length) this.diagnostics?.begin(c.id);
             touchedPage = true;
-            if (!continueRecording)
+            const canEnterDirectly =
+                businessEntry &&
+                this.actions < (this.caseStepLimit ?? Infinity) &&
+                businessEntry.prefix.every((step, i) => steps[i] === step);
+            const resetUrl =
+                !continueRecording && canEnterDirectly && businessEntry.resetAtEntry
+                    ? c.url || this.config.url
+                    : null;
+            if (!continueRecording && !resetUrl)
                 await this.resetCase(c.url || this.config.url, {
                     force: healthExpected.length > 0,
                 });
+            await awaitReplayLogin(this.page);
             this.phase = 'precondition';
-            const scopeSnapshot = await observe(this.page);
-            const titleAreas = scopeNames(
-                c.title + '\n' + steps.filter((s) => /^切换/.test(s) && s.includes('/')).join('\n'),
-                scopeSnapshot.controls,
-            );
+            const titleAreas = resetUrl
+                ? []
+                : scopeNames(
+                      c.title +
+                          '\n' +
+                          steps.filter((s) => /^切换/.test(s) && s.includes('/')).join('\n'),
+                      (await observe(this.page)).controls,
+                  );
             if (titleAreas.length === 1) await this.showArea(titleAreas[0]);
             result.precondition_checks = [];
             for (const p of preconditions) {
@@ -1422,6 +1768,7 @@ export class Engine {
                 );
             for (const area of titleAreas.length ? titleAreas : [null]) {
                 this.phase = 'step';
+                this.verifiedCreate = null;
                 this.area = area;
                 this.rowKey = null;
                 this.exactRecord = null;
@@ -1430,18 +1777,35 @@ export class Engine {
                     await this.showArea(area);
                     console.log('  用例范围：' + area);
                 }
-                for (const [index, text] of steps.entries()) {
+                let replaced = 0;
+                for (const [index, original] of steps.entries()) {
+                    if (index < replaced) continue;
+                    let text = original;
                     const firstEvent = this.events.length;
                     let status = '已完成';
                     if (healthExpected.length)
                         this.diagnostics?.setStep({ index: index + 1, text });
                     try {
-                        await this.step(text);
+                        if (
+                            index === 0 &&
+                            !area &&
+                            canEnterDirectly &&
+                            this.actions < (this.caseStepLimit ?? Infinity) &&
+                            (await this.enterRecordedPage(businessEntry, resetUrl))
+                        ) {
+                            replaced = businessEntry.prefix.length;
+                            text = `直达录制业务入口 ${businessEntry.url}`;
+                            console.log('  ' + text);
+                        } else await this.step(text, steps[index + 1]);
                     } catch (error) {
                         status = '未完成';
                         throw error;
                     } finally {
-                        if (healthExpected.length && this.diagnostics) {
+                        if (
+                            healthExpected.length &&
+                            this.diagnostics &&
+                            !this.config.replayLoginActive
+                        ) {
                             try {
                                 for (const detail of new Set(await observePageErrors(this.page)))
                                     this.diagnostics.add({
@@ -1452,7 +1816,12 @@ export class Engine {
                                 pageObserved = false;
                             }
                         }
+                        const notes = this.events
+                            .slice(firstEvent)
+                            .map((event) => event.note)
+                            .filter(Boolean);
                         const sequence = await capture({
+                            ...(notes.length && { notes }),
                             phase: 'step',
                             index: index + 1,
                             text,
@@ -1468,7 +1837,9 @@ export class Engine {
                     if (healthAssertions.has(text)) continue;
                     let assertion;
                     try {
-                        assertion = await this.verify(text);
+                        assertion = await runReplayOperation(this.page, text, false, () =>
+                            this.verify(text),
+                        );
                     } catch (e) {
                         assertion = {
                             text,
@@ -1513,6 +1884,7 @@ export class Engine {
                 });
             }
         }
+        if (this.config.replayLoginActive) throw Error('回放在手动登录期间中止');
         if (healthExpected.length) {
             const monitored = this.diagnostics?.active;
             if (monitored && completed) await this.page.waitForTimeout(150).catch(() => {});
@@ -1573,7 +1945,7 @@ export class Engine {
             result.category = '环境接口故障';
             result.reason += '；页面未就绪且捕获HTTP5xx，不能据此判定产品功能错误';
         }
-        if (touchedPage) {
+        if (touchedPage && !this.config.replayLoginActive) {
             const screenshot = `${caseDir}/final.png`;
             try {
                 await this.page.screenshot({ path: path.join(this.config.out, screenshot) });
@@ -1598,6 +1970,8 @@ export class Engine {
                 ),
             );
         }
+        await Promise.all([...this.fieldMatches.values()].map((field) => field.handle.dispose()));
+        this.fieldMatches.clear();
         return result;
     }
 }

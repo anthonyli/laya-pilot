@@ -3,6 +3,7 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { chromium } from 'playwright';
 import { expect } from 'playwright/test';
+import { Engine } from '../../scripts/lib/engine.mjs';
 import {
     createExpectation,
     readCreateState,
@@ -218,4 +219,114 @@ test('component adapters scope generated fields, row identities and paginated co
         );
     const ambiguous = await page.evaluate(readCreateState, adapters);
     assert.equal(compareCreateStates(before, ambiguous).status, '未验证');
+});
+
+test('saved workbooks and generated specs confirm an optional duplicate prompt exactly once', async (t) => {
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    const url = 'http://test.local/';
+    let mode = 'duplicate';
+    const question = 'The indicator is repeated. Do you want to save it?';
+    await page.route(url, (route) =>
+        route.fulfill({
+            contentType: 'text/html',
+            body: `<meta charset="utf-8"><table><thead><tr><th>Name</th></tr></thead><tbody></tbody></table>
+        <button onclick="editor.hidden=false">Add</button>
+        <button onclick="throw Error('clicked a background button')">OK</button>
+        <div id="editor" role="dialog" hidden><label>Name<input value="Metric 12h"></label>
+        <button onclick="save()">Save</button></div>
+        <div id="prompt" role="dialog" hidden><div role="document">
+        <span>${question}</span><table><tbody><tr><td>Current Duplicate Indicator ID</td></tr></tbody></table>
+        <button>Cancel</button><button onclick="finish()">OK</button></div></div>
+        <div role="alertdialog" id="receipt" hidden>Receipt ready<button onclick="this.parentElement.hidden=true;window.received=true">OK</button></div>
+        <script>
+        window.confirms = 0;
+        function finish() {
+            window.confirms++;
+            promptBox.hidden = true;
+            editor.hidden = true;
+            if (${JSON.stringify(mode)} === 'receipt') receipt.hidden = false;
+            document.querySelector('tbody').insertAdjacentHTML('afterbegin','<tr><td>Metric 12h</td></tr>');
+        }
+        const promptBox = document.getElementById('prompt');
+        function save() {
+            if (${JSON.stringify(mode)} === 'direct') finish();
+            else if (${JSON.stringify(mode)} === 'native') {
+                if (confirm('指标重复，是否继续保存？')) finish();
+            } else setTimeout(() => {
+                if (${JSON.stringify(mode)} === 'nested') editor.append(promptBox);
+                promptBox.hidden = false;
+            }, 80);
+        }
+        </script>`,
+        }),
+    );
+    const save = '在弹窗中点击「Save」按钮并验证新增记录';
+    const ok = '在弹窗中点击「OK」按钮';
+    const engine = new Engine(page, null, {
+        url,
+        origins: [new URL(url).origin],
+        allowWrite: true,
+        delay: 0,
+        assertTimeout: 1500,
+    });
+    for (mode of ['duplicate', 'direct', 'native', 'nested', 'receipt']) {
+        await page.goto(url);
+        await page.getByRole('button', { name: 'Add' }).click();
+        await engine.step(save);
+        await engine.step(ok);
+        const verified = engine.events.findLast((entry) => entry.action === 'verify-create');
+        assert.equal(verified.status, '通过');
+        assert.equal(!!verified.autoConfirmed, mode !== 'direct');
+        assert.equal(await page.evaluate(() => window.confirms), 1);
+        if (mode === 'receipt') assert.equal(await page.evaluate(() => window.received), true);
+        else assert.equal(engine.events.at(-1).action, 'save-confirmation');
+    }
+
+    const button = (name, scope) => ({ kind: 'click', target: { name, role: 'button', scope } });
+    for (const recordedOK of [true, false]) {
+        const actions = [button('Add'), button('Save', 'dialog')];
+        if (recordedOK) actions.push(button('OK', 'dialog'));
+        let run;
+        const register = (_name, callback) => {
+            run = callback;
+        };
+        register.skip = (skip, reason) => assert.equal(skip, false, reason);
+        runInNewContext(renderRecordingSpec({ url, actions }), {
+            require: () => ({ test: register, expect }),
+            URL,
+            setTimeout,
+        });
+        for (mode of ['duplicate', 'direct']) {
+            await run({ page });
+            assert.equal(await page.evaluate(() => window.confirms), 1);
+        }
+    }
+});
+
+test('a duplicate error, an unrelated question or two affirmative buttons do not authorize a click', async (t) => {
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    for (const [message, buttons] of [
+        ['Duplicate indicator. Cannot save.', ['OK']],
+        ['The indicator is repeated. Do you want to overwrite it?', ['OK']],
+        ['Do you want to delete this indicator?', ['OK']],
+        ['指标重复，是否仍要保存？', ['确定', '继续保存']],
+    ]) {
+        await page.setContent(`<table><thead><tr><th>Name</th></tr></thead><tbody></tbody></table>
+            <form><label>Name<input value="x"></label><button type="button" onclick="document.querySelector('aside').hidden=false">Save</button></form>
+            <aside role="alertdialog" hidden>${message}${buttons.map((name) => `<button onclick="document.body.dataset.clicked='yes'">${name}</button>`).join('')}</aside>`);
+        const result = await verifyCreateClick(
+            page,
+            () => page.getByText('Save', { exact: true }).click(),
+            readCreateState,
+            compareCreateStates,
+            recordedDialogSelector,
+            320,
+        );
+        assert.notEqual(result.status, '通过');
+        assert.equal(await page.locator('body').getAttribute('data-clicked'), null);
+    }
 });

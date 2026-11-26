@@ -87,16 +87,18 @@ export function safeText(value, limit = 500) {
 }
 
 export class BrowserDiagnostics {
-    constructor(context, { checkBusinessResponses = false } = {}) {
+    constructor(context, { checkBusinessResponses = false, paused = () => false } = {}) {
         this.active = null;
         this.requests = new WeakMap();
+        this.paused = paused;
         context.on('request', (request) => {
-            if (this.active) {
+            if (this.active && !paused()) {
                 this.requests.set(request, { owner: this.active, step: this.active.step });
                 if (['xhr', 'fetch'].includes(request.resourceType())) this.active.apiRequests++;
             }
         });
         context.on('response', (response) => {
+            if (paused()) return;
             const request = response.request(),
                 kind = request.resourceType(),
                 status = response.status();
@@ -188,7 +190,7 @@ export class BrowserDiagnostics {
         page.on('crash', () => this.add({ kind: 'crash', detail: '页面进程崩溃' }));
     }
     add(event, owner = this.active) {
-        if (!owner) return;
+        if (!owner || this.paused()) return;
         if (owner.events.length >= MAX_EVENTS) {
             owner.truncated = true;
             return;

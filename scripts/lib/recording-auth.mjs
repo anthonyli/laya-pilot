@@ -69,8 +69,9 @@ export async function rememberRecordingAuth(
     login,
     configuredCheck,
     isCurrent = () => true,
+    { interactive = false, stateFile } = {},
 ) {
-    if (!login?.account || !root || page.isClosed()) return false;
+    if (!login || (!login.account && !interactive) || !root || page.isClosed()) return false;
     const origin = new URL(login.url).origin;
     const proof = await page
         .evaluate(
@@ -147,16 +148,18 @@ export async function rememberRecordingAuth(
     }
     if (!check) return false;
     const info = { loginUrl: authRoute(login.url), landingUrl: authRoute(proof.landingUrl), check };
-    if (page.url() !== proof.landingUrl || !isCurrent()) return false;
-    const authState = path.join(authDirectory(root, login.url), digest(login.account) + '.json');
+    if (page.url() !== proof.landingUrl || !(await isCurrent())) return false;
+    const authState =
+        stateFile || path.join(authDirectory(root, login.url), digest(login.account) + '.json');
     const saved = await saveAuthState(context, page, {
         url: login.url,
         user: login.account,
         authState,
         authSessionStorage: true,
         recordedLogin: info,
+        validateBeforeSave: async () => page.url() === proof.landingUrl && (await isCurrent()),
     });
-    if (saved && login.credentials && isCurrent() && page.url() === proof.landingUrl) {
+    if (saved && login.credentials && (await isCurrent()) && page.url() === proof.landingUrl) {
         await saveLoginCredentials(root, login.url, login.account, {
             ...login.credentials,
             loginUrl: info.loginUrl,

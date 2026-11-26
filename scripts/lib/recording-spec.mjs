@@ -18,7 +18,16 @@ import {
     selectSelectors,
 } from './recorded-select.mjs';
 import { recordedCreateActions } from './recording-cases.mjs';
-import { readCreateState, compareCreateStates, verifyCreateClick } from './recorded-create.mjs';
+import {
+    readCreateState,
+    compareCreateStates,
+    verifyCreateClick,
+    saveConfirmationButton,
+    cancelConfirmationButton,
+    saveQuestion,
+    conflictingSaveAction,
+    needsSaveFollowup,
+} from './recorded-create.mjs';
 import { findDialogCard } from './recorded-card.mjs';
 import {
     navigationIconSelector,
@@ -74,7 +83,10 @@ function recordedLocator(target, ui) {
     if (['namedNavIcon', 'namedIcon'].includes(target.locator)) {
         if (target.locator === 'namedNavIcon')
             scope += `.locator(${JSON.stringify(navigationScope)})`;
-        return `(await findNamedIcon(page, ${scope}, ${name}, iconOwner, declaredIconName))`;
+        const hint = target.iconClass
+            ? `, undefined, ${JSON.stringify(navigationIconSelector(target.iconClass))}`
+            : '';
+        return `(await findNamedIcon(page, ${scope}, ${name}, iconOwner, declaredIconName${hint}))`;
     }
     if (target.locator === 'navIcon')
         return `${scope}.locator(${JSON.stringify(navigationIconSelector(target.name))}).filter({ visible: true })`;
@@ -134,8 +146,12 @@ export function renderRecordingSpec(recording, channel) {
     if (creates.size)
         statements.push(
             businessResponseFailed.toString(),
+            `const saveConfirmationButton = ${saveConfirmationButton};`,
+            `const saveQuestion = ${saveQuestion};`,
+            `const conflictingSaveAction = ${conflictingSaveAction};`,
             readCreateState.toString(),
             compareCreateStates.toString(),
+            needsSaveFollowup.toString(),
             verifyCreateClick.toString(),
         );
     if (recording.actions.some((action) => action.target?.locator === 'cardTitle'))
@@ -158,7 +174,8 @@ export function renderRecordingSpec(recording, channel) {
         );
     if (recording.actions[0]?.kind !== 'goto')
         statements.push(`    await page.goto(${JSON.stringify(recording.url)});`);
-    for (const action of recording.actions) {
+    for (let index = 0; index < recording.actions.length; index++) {
+        const action = recording.actions[index];
         if (action.kind === 'editor') {
             statements.push(
                 `    await replayEditorOperation(page, ${JSON.stringify(action.operation)}${parameterized ? ', data' : ''});`,
@@ -200,13 +217,29 @@ export function renderRecordingSpec(recording, channel) {
             continue;
         }
         if (target && creates.has(action)) {
+            const next = recording.actions[index + 1];
+            const nextButton =
+                next?.kind === 'click' && next.target?.role === 'button' ? next.target : null;
+            const preserveCancel = nextButton && cancelConfirmationButton.test(nextButton.name);
+            const nextTarget = nextButton && recordedLocator(nextButton, ui);
             statements.push(
                 '    {',
-                `        const result = await verifyCreateClick(page, () => ${target}.click(), readCreateState, compareCreateStates, ${JSON.stringify(ui)});`,
+                `        const result = await verifyCreateClick(page, () => ${target}.click(), readCreateState, compareCreateStates, ${JSON.stringify(ui)}${preserveCancel ? ', undefined, false' : ''});`,
                 "        test.skip(result.status === '未验证', result.reason);",
                 "        expect(result.status, result.reason).toBe('通过');",
-                '    }',
             );
+            if (
+                nextButton &&
+                ['dialog', '弹窗'].includes(nextButton.scope) &&
+                saveConfirmationButton.test(nextButton.name) &&
+                nextTarget
+            ) {
+                statements.push(
+                    `        if (await needsSaveFollowup(page, ${JSON.stringify(ui.dialog)}, ${JSON.stringify(nextButton.name)}, result.autoConfirmed)) await ${nextTarget}.click();`,
+                );
+                index++;
+            }
+            statements.push('    }');
             continue;
         }
         if (target && action.kind === 'assert') {

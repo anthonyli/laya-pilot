@@ -1,3 +1,11 @@
+import {
+    attachReplayLogin,
+    navigateReplayPage,
+    pauseForReplayRedirect,
+    restoreReplayLogin,
+    setReplayTraces,
+    runReplayOperation,
+} from './interactive-replay.mjs';
 import { fileURLToPath } from 'node:url';
 import { PendingWrites } from './pending-writes.mjs';
 import fs from 'node:fs/promises';
@@ -1561,7 +1569,21 @@ export class Workflow {
                             target: step.target?.name || '',
                         };
                         this.diagnostics.setStep(c.failedStep);
-                        await this.replayStep(step);
+                        await runReplayOperation(
+                            this.page,
+                            [c.id, '第' + (index + 1) + '步', step.target?.name || step.kind].join(
+                                ' · ',
+                            ),
+                            !step.kind.startsWith('assert-'),
+                            () => this.replayStep(step),
+                            () =>
+                                c.attempts.push({
+                                    step: '第' + (index + 1) + '步',
+                                    attempt: 1,
+                                    status: '人工确认',
+                                    reason: '重新登录后由操作者确认上一步已完成。',
+                                }),
+                        );
                         c.failedStep = null;
                         this.diagnostics.setStep(null);
                     }
@@ -1780,12 +1802,20 @@ export async function runWorkflow(config, mode, readSecret, root) {
             const modelWarmup = beginModelWarmup(laya, config);
             config.signal.throwIfAborted();
             let authRestored;
+            config.explicitAuthCheck = config.authCheck;
+            if (mode === 'execute') await restoreReplayLogin(config);
             ({ browser, context, page, authRestored } = await openBrowser(config));
+            if (mode === 'execute') attachReplayLogin(page, context, config);
             config.signal.throwIfAborted();
-            diagnostics = new BrowserDiagnostics(context);
+            diagnostics = new BrowserDiagnostics(context, {
+                paused: () => config.replayLoginActive,
+            });
             diagnostics.begin('startup');
-            await page.goto(url.href, { waitUntil: 'domcontentloaded' });
-            await waitForReady(page, { timeout: config.pageTimeout });
+            await navigateReplayPage(page, url.href);
+            await waitForReady(page, {
+                timeout: config.pageTimeout,
+                pauseForRedirect: () => pauseForReplayRedirect(page),
+            });
             const { target } = await import('./dom.mjs');
             phase = 'authentication';
             authStatus = 'pending';
@@ -1801,7 +1831,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
                     }),
                 authRestored,
             );
-            await saveAuthState(context, page, config);
+            if (authStatus !== 'interactive') await saveAuthState(context, page, config);
             await waitModelWarmup(modelWarmup);
             phase = 'testing';
             writePrivateJson(
@@ -1814,6 +1844,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
             // Authentication is complete before screenshots/traces/progress are recorded.
             // Traces start per case from here on.
             workflow.traces = new CaseTraces(context, config.out);
+            setReplayTraces(page, workflow.traces);
             traceStarted = true;
             const results =
                 mode === 'generate' ? await workflow.generate() : await workflow.replay(input);
@@ -1857,7 +1888,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
             failure = config.signal.aborted ? config.signal.reason : error;
             status = config.signal.aborted ? 'interrupted' : 'failed';
             if (authStatus === 'pending') authStatus = 'failed';
-            if (page) {
+            if (page && !config.replayLoginActive) {
                 runEvidence = 'run/failure.png';
                 if (!(await captureFailureScreenshot(page, path.join(config.out, runEvidence))))
                     runEvidence = '';

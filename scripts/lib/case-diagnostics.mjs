@@ -72,7 +72,10 @@ export function stepDiagnostic(text) {
         !expanded.some(
             (s) =>
                 (s.verb === 'navigate' && !s.target) ||
-                (['fill', 'select'].includes(s.verb) && s.value === undefined),
+                (['fill', 'select'].includes(s.verb) &&
+                    s.value === undefined &&
+                    !s.range &&
+                    s.optionGoal === undefined),
         )
     )
         return {

@@ -225,6 +225,7 @@ export async function saveAuthState(context, page, config) {
         !Object.keys(sessionStorage || {}).length
     )
         return false;
+    if (config.validateBeforeSave && !(await config.validateBeforeSave())) return false;
     writePrivateJson(path.resolve(config.authState), {
         schemaVersion: 1,
         origin: new URL(config.url).origin,
@@ -238,6 +239,17 @@ export async function saveAuthState(context, page, config) {
 }
 
 export async function ensureAuthentication(page, config, readSecret, chooseTarget, restored) {
+    const { awaitReplayLogin, hasReplayLogin } = await import('./interactive-replay.mjs');
+    if (hasReplayLogin(page)) {
+        if (config.authenticated || (await awaitReplayLogin(page, true))) return 'interactive';
+        if (new URL(page.url()).origin !== new URL(config.url).origin)
+            throw Error('页面尚未返回目标站点。');
+        if (config.authCheck) {
+            const marker = page.locator(config.authCheck);
+            await marker.waitFor({ state: 'visible', timeout: config.pageTimeout });
+        }
+        return restored ? 'reused' : 'not-required';
+    }
     if (config.manualLogin && config.headless) throw Error('手动登录需要可见浏览器');
     const loginEntry =
         !config.authState && /\/(?:login|signin|sign-in)\/?$/i.test(new URL(config.url).pathname);

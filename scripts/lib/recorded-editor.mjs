@@ -20,11 +20,29 @@ export function treeNodePath(node) {
 // Store a rendered line number and character boundary. Recompute pixels in the playback viewport.
 export function editorPoint(root, point) {
     const margins = [...root.querySelectorAll('.margin-view-overlays .line-numbers')];
-    for (const line of root.querySelectorAll('.view-lines > .view-line')) {
+    const lines = root.querySelectorAll('.view-lines > .view-line');
+    for (const line of lines) {
         const rect = line.getBoundingClientRect();
         const margin = margins.find((el) => el.parentElement.style.top === line.style.top);
         const number = Number(margin?.textContent);
         if (!Number.isSafeInteger(number) || number < 1) continue;
+        // Monaco places the caret on line 1 even when a click lands below its empty span.
+        if (number === 1 && lines.length === 1 && !line.textContent && rect.height > 0) {
+            if (point.line === 1 && (point.column === 1 || point.column === 'end'))
+                return { x: rect.left + 1, y: rect.top + rect.height / 2 };
+            if (point.line === undefined) {
+                const viewport = (
+                    line.closest('.monaco-scrollable-element') || root
+                ).getBoundingClientRect();
+                if (
+                    point.x >= rect.left &&
+                    point.x < viewport.right &&
+                    point.y >= rect.top &&
+                    point.y < viewport.bottom
+                )
+                    return { line: 1, column: 1 };
+            }
+        }
         if (
             point.line !== undefined
                 ? number !== point.line

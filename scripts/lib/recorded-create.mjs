@@ -2,6 +2,36 @@ import { businessResponseFailed } from './diagnostics.mjs';
 
 // These helpers are embedded in standalone recordings as well as used by Excel replay.
 export const createExpectation = '保存后列表新增与本次表单标识匹配的唯一记录';
+export const saveConfirmationButton =
+    /^(?:ok|yes|confirm|continue(?: saving)?|save(?: anyway)?|submit|确\s*定|确\s*认|是|继续(?:保存)?|仍(?:然|要)?保存|(?:确认|确定)?保存|确认提交)$/i;
+export const cancelConfirmationButton = /^(?:cancel|no|back|取\s*消|否|返回)$/i;
+
+// Match an affirmative question about saving. A duplicate error that can only be
+// dismissed, or an offer to replace an existing record, is not a creation.
+export const saveQuestion = new RegExp(
+    [
+        /\b(?:do you (?:still )?(?:want|wish) to|would you like to|are you sure you want to)\s+(?:(?:still|continue to)\s+)?(?:save|submit|create)\b/,
+        /\b(?:save|submit|create) (?:it |this )?anyway\s*\?/,
+        /(?:是否|要不要|确定要|确认要)(?:仍然?|依然|还要?|继续|要|重新|\s)*(?:保存|提交|创建|新增)/,
+        /(?:重复|相同|相似|已存在|\b(?:duplicate|repeated|similar|identical)\b|already exists)[^?？]{0,100}(?:是否继续|continue\s*\?)/,
+    ]
+        .map((pattern) => pattern.source)
+        .join('|'),
+    'i',
+);
+export const conflictingSaveAction =
+    /\b(?:delete|remove|overwrite|replace|discard|cannot|can['’]t)\b|删除|移除|覆盖|替换|放弃|无法保存|不能保存|不允许保存/i;
+
+// A captured OK immediately after Save can belong to the optional duplicate prompt.
+// Keep an independent acknowledgement if one is actually present after the save.
+export async function needsSaveFollowup(page, selector, name, autoConfirmed) {
+    const dialogs = page.locator(selector).filter({ visible: true });
+    const pending = dialogs.filter({ has: page.getByRole('button', { name, exact: true }) });
+    const count = await pending.count();
+    if (!autoConfirmed || !count) return count > 0;
+    const handled = pending.filter({ hasText: saveQuestion, hasNotText: conflictingSaveAction });
+    return count > (await handled.count());
+}
 
 export function readCreateState(adapters) {
     const ui = typeof adapters === 'string' ? { dialog: adapters } : adapters || {};
@@ -226,8 +256,40 @@ export function compareCreateStates(before, after) {
     return passed[0] || results.find((result) => result.status === '未验证') || results[0];
 }
 
-export async function verifyCreateClick(page, click, snapshot, compare, adapters, timeout = 5000) {
+export async function verifyCreateClick(
+    page,
+    click,
+    snapshot,
+    compare,
+    adapters,
+    timeout = 5000,
+    allowConfirmation = true,
+) {
     const before = await page.evaluate(snapshot, adapters);
+    const selector = typeof adapters === 'string' ? adapters : adapters?.dialog;
+    const candidates = page
+        .locator(selector || 'dialog[open],[role=dialog],[role=alertdialog]')
+        .filter({ visible: true, hasText: saveQuestion, hasNotText: conflictingSaveAction });
+    const prompts = candidates.filter({ hasNot: candidates });
+    const canConfirm = allowConfirmation && (await prompts.count()) === 0;
+    const affirmative = prompts.getByRole('button', { name: saveConfirmationButton });
+    let autoConfirmed = false;
+    let deadline;
+    const handleDialog = async (dialog) => {
+        if (
+            dialog.type() === 'confirm' &&
+            !autoConfirmed &&
+            saveQuestion.test(dialog.message()) &&
+            !conflictingSaveAction.test(dialog.message())
+        ) {
+            autoConfirmed = true;
+            await dialog.accept();
+            deadline = Date.now() + timeout;
+        } else if (dialog.type() === 'beforeunload') await dialog.accept();
+        else await dialog.dismiss();
+    };
+    const handleNative =
+        canConfirm && !page.listenerCount('dialog') && !page.context().listenerCount('dialog');
     // Watch only writes initiated during this click. An optimistic row or a success toast must
     // not mask an explicit saving error. Response bodies never enter artifacts or messages.
     const writes = new Set();
@@ -260,27 +322,54 @@ export async function verifyCreateClick(page, click, snapshot, compare, adapters
     page.on('request', track);
     page.on('requestfailed', failed);
     page.on('response', finish);
+    if (handleNative) page.on('dialog', handleDialog);
     try {
         await click();
-        const deadline = Date.now() + timeout;
+        deadline = Date.now() + timeout;
         let stable = null;
+        let result;
         for (;;) {
+            if (
+                canConfirm &&
+                !autoConfirmed &&
+                !rejected &&
+                (await prompts.count()) === 1 &&
+                (await affirmative.count()) === 1
+            ) {
+                try {
+                    await affirmative.click({ timeout: Math.max(1, deadline - Date.now()) });
+                    autoConfirmed = true;
+                    stable = null;
+                    deadline = Date.now() + timeout;
+                } catch (error) {
+                    // The prompt can close while the button becomes actionable.
+                    if (await affirmative.count()) throw error;
+                }
+            }
             const after = await page.evaluate(snapshot, adapters);
-            if (rejected) return { status: '失败', reason: '保存请求明确返回失败。' };
-            const result = compare(before, after);
+            if (rejected) {
+                result = { status: '失败', reason: '保存请求明确返回失败。' };
+                break;
+            }
+            result = compare(before, after);
             if (after.invalid || after.errors.some((error) => !before.errors.includes(error)))
-                return result;
+                break;
             if (result.status === '通过' && !writes.size) {
                 stable ??= Date.now();
-                if (Date.now() - stable >= 250) return result;
+                if (Date.now() - stable >= 250) break;
             } else stable = null;
-            if (Date.now() >= deadline)
-                return writes.size || result.status === '通过'
-                    ? { status: '未验证', reason: '保存请求或列表尚未稳定。' }
-                    : result;
+            if (Date.now() >= deadline) {
+                if (writes.size || result.status === '通过')
+                    result = { status: '未验证', reason: '保存请求或列表尚未稳定。' };
+                break;
+            }
             await page.waitForTimeout(80);
         }
+        return autoConfirmed
+            ? { ...result, autoConfirmed, reason: '已自动确认继续保存。' + result.reason }
+            : result;
     } finally {
+        if (handleNative) page.off('dialog', handleDialog);
         page.off('request', track);
         page.off('requestfailed', failed);
         page.off('response', finish);

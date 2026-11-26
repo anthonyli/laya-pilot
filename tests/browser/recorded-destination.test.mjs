@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { Engine } from '../../scripts/lib/engine.mjs';
 import { chromium } from 'playwright';
 import { BrowserDiagnostics, HEALTH_EXPECTATIONS } from '../../scripts/lib/diagnostics.mjs';
 import { expectation, lines } from '../../scripts/lib/language.mjs';
@@ -126,5 +130,81 @@ test('uses the exact recorded destination and observed area selection before cla
         assert.equal(result.status, '失败');
         assert.equal(result.health_checks[0].status, '失败');
         assert.notEqual(result.browser_events[0].severity, 'info');
+    }
+});
+
+test('verified deep links skip entry clicks and an app requiring menu state replays them', async (t) => {
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'laya-entry-test-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const base = 'http://business.test',
+        start = base + '/home',
+        url = base + '/reports';
+    for (const mode of ['direct', 'menu-state']) {
+        const ctx = await browser.newContext();
+        try {
+            const page = await ctx.newPage();
+            const visits = [];
+            page.on('request', (req) => {
+                if (req.isNavigationRequest()) visits.push(new URL(req.url()).pathname);
+            });
+            await page.route(base + '/**', (route) =>
+                route.fulfill({
+                    contentType: 'text/html',
+                    body:
+                        new URL(route.request().url()).pathname === '/home'
+                            ? '<nav><a href="/reports" onclick="sessionStorage.followed=1">Reports</a></nav>'
+                            : '<h1>Reports</h1><div id="tab" role="tab" aria-selected="true">Edit</div><script>if (' +
+                              JSON.stringify(mode) +
+                              '==="menu-state"&&!sessionStorage.followed) document.querySelector("#tab").remove()</script>',
+                }),
+            );
+            const e = new Engine(page, null, {
+                url: start,
+                origins: [base],
+                out: root,
+                delay: 0,
+                confirmedDelay: 0,
+                assertTimeout: 250,
+                maxSteps: 10,
+            });
+            const prefix = ['点击「Reports」链接'];
+            const c = {
+                id: 'NAV',
+                title: '进页',
+                steps: prefix.concat('切换到「Edit」区域').join('\n'),
+                expected: '页面显示「Reports」',
+                data: '{}',
+                url: start,
+            };
+            const result = await e.runCase(c, {
+                businessEntry: { url, prefix, anchor: 'Edit', roles: ['tab'], resetAtEntry: true },
+            });
+            assert.equal(result.status, '通过', result.reason);
+            const direct = mode === 'direct';
+            assert.deepEqual(visits, direct ? ['/reports'] : ['/reports', '/home', '/reports']);
+            assert.equal(
+                result.actions.some((x) => x.action === 'direct-entry'),
+                direct,
+            );
+            assert.equal(
+                result.actions.some((x) => x.action === 'entry-fallback'),
+                !direct,
+            );
+            assert.equal(
+                result.actions.some((x) => x.action === 'click' && x.control.name === 'Reports'),
+                !direct,
+            );
+            assert.ok(
+                result.actions.some((x) => x.action === 'click' && x.control.name === 'Edit'),
+            );
+            assert.equal(
+                await page.evaluate(() => sessionStorage.followed),
+                direct ? undefined : '1',
+            );
+        } finally {
+            await ctx.close();
+        }
     }
 });

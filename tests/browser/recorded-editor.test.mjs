@@ -7,6 +7,48 @@ import { generateRecordedCases } from '../../scripts/lib/recording-cases.mjs';
 import { renderRecordingSpec } from '../../scripts/lib/recording-spec.mjs';
 import { Engine } from '../../scripts/lib/engine.mjs';
 import { lines } from '../../scripts/lib/language.mjs';
+import { replayEditorOperation } from '../../scripts/lib/recorded-editor.mjs';
+
+test('records and replays a click in the blank Monaco editing surface before typing @', async (t) => {
+    const server = http.createServer((_, res) =>
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`
+            <div class="monaco-editor" style="position:relative">
+              <div class="margin-view-overlays"><div style="top:0"><span class="line-numbers">01</span></div></div>
+              <div class="monaco-scrollable-element" style="width:400px;height:160px">
+                <div class="lines-content" style="height:100%" onclick="document.querySelector('textarea').focus()">
+                  <div class="view-lines"><div class="view-line" style="top:0;height:24px"><span><span></span></span></div></div>
+                </div>
+              </div>
+              <textarea class="inputarea" aria-label="Editor content" style="position:absolute;top:20px;left:1px;width:2px;height:18px"></textarea>
+            </div>`),
+    );
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => {
+        server.closeAllConnections();
+        return new Promise((resolve) => server.close(resolve));
+    });
+    const url = 'http://127.0.0.1:' + server.address().port;
+    const captured = await captureRecording({
+        url,
+        playwright: { chromium },
+        headless: true,
+        async onReady(page) {
+            await page.locator('.inputarea').click();
+            await page.locator('.lines-content').click({ position: { x: 90, y: 35 } });
+            await page.keyboard.type('@');
+            await page.getByRole('button', { name: '完成录制' }).click();
+        },
+    });
+    const operations = captured.actions.filter((a) => a.kind !== 'goto').map((a) => a.operation);
+    const cursor = { type: 'cursor', from: { line: 1, column: 1 } };
+    assert.deepEqual(operations, [cursor, cursor, { type: 'text', value: '@' }]);
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.goto(url);
+    for (const op of operations) await replayEditorOperation(page, op);
+    assert.equal(await page.locator('textarea').inputValue(), '@');
+});
 
 test('records Monaco selections, keystrokes, tree paths and a suggestion removed on mousedown', async (t) => {
     const server = http.createServer((_, res) =>

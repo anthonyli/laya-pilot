@@ -14,7 +14,7 @@ LayaPilot runs test cases in a browser and produces reports with failure evidenc
 | **Record new cases**       | A page URL; you act in the browser  | An editable Excel case + the original Playwright script  |
 | **Generate from a page**   | A page URL + the allowed operations | New Excel cases that were executed and passed assertions |
 
-During execution, the Laya decision model picks controls on the current page. The model is called through an **API** by default; the local model must be enabled explicitly. See the [workflow diagram](docs/workflow.en.md) for how the features fit together.
+Excel replay locates unique controls by name and role. When a step uses different wording, the general locator asks Laya to choose among controls on the current page. Laya uses the **API** by default. Enable the local model explicitly to use it. See the [workflow diagram](docs/workflow.en.md) for how the features fit together.
 
 ## Choose how to use it
 
