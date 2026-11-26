@@ -1,6 +1,6 @@
 # Architecture / 架构
 
-LayaPilot targets enterprise admin applications, especially table, filter, form and CRUD workflows. The architecture prioritizes accurate assertions, predictable execution and local or intranet inference. Approvals, permission matrices and file-transfer workflows require explicit adapters and validation before they can be treated as supported enterprise features.
+falcon targets enterprise admin applications, especially table, filter, form and CRUD workflows. The architecture prioritizes accurate assertions, predictable execution and local or intranet inference. Approvals, permission matrices and file-transfer workflows require explicit adapters and validation before they can be treated as supported enterprise features.
 
 The public runner exposes execution and generation. Execution through `--excel` detects workbook format before opening a browser: ordinary cases use the natural-language engine, generated workbooks retain structured replay and integrity checks. The legacy `--mode execute` command remains compatible. Internally, there are three paths: `generate` and `execute` in `scripts/lib/workflow.mjs`, and natural-language workbook execution in `scripts/lib/engine.mjs`. `scripts/worker.py` imports spreadsheets through `openpyxl` and performs local Laya decisions when requested. API decisions use `scripts/lib/model.mjs`; the API key remains in the environment or a hidden prompt. Browser initialization is centralized in `scripts/lib/browser-provider.mjs`.
 

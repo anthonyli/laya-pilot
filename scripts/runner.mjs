@@ -238,7 +238,7 @@ let laya, browser, activePage;
 async function main() {
     if (flag('--help')) {
         console.log(
-            'LayaPilot · 用例回归\n执行：node scripts/runner.mjs --excel 用例.xlsx --url 页面地址 --headless；自动识别普通用例或结构化计划\n检查：node scripts/runner.mjs --excel 用例.xlsx --inspect\n生成：node scripts/runner.mjs --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n旧命令兼容：node scripts/runner.mjs --mode execute --case-file 用例.xlsx [--url 页面地址]\n--allow-write：允许已授权的写操作；--cases：仅普通Excel编号筛选。\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。',
+            'falcon · 用例回归\n执行：node scripts/runner.mjs --excel 用例.xlsx --url 页面地址 --headless；自动识别普通用例或结构化计划\n检查：node scripts/runner.mjs --excel 用例.xlsx --inspect\n生成：node scripts/runner.mjs --mode generate --url 页面地址 [--template-excel 模板.xlsx] [--case-file 用例.xlsx]\n旧命令兼容：node scripts/runner.mjs --mode execute --case-file 用例.xlsx [--url 页面地址]\n--allow-write：允许已授权的写操作；--cases：仅普通Excel编号筛选。\n--config 配置.json；--provider local|api；--browser-provider playwright；--browser-channel chrome|chromium；--headless。API地址和模型名称需自行配置，密钥由LAYA_API_KEY或隐藏输入提供。',
         );
         console.log(
             '--auth-state 文件：保存/复用登录态；--auth-reset：重新登录；--auth-check CSS：登录成功标记；--auth-session-storage：保存当前站点 sessionStorage',

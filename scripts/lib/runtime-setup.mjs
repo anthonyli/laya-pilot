@@ -147,7 +147,7 @@ export async function installStandalonePython(dataRoot, log = console.log) {
     const name = `cpython-${STANDALONE_VERSION}+${STANDALONE_RELEASE}-${triple}-install_only.tar.gz`;
     const url = `https://github.com/astral-sh/python-build-standalone/releases/download/${STANDALONE_RELEASE}/${encodeURIComponent(name)}`;
     log(
-        `没有找到 Python 3.10+，下载独立 Python ${STANDALONE_VERSION}（约 25–70 MB，只用于 LayaPilot）…`,
+        `没有找到 Python 3.10+，下载独立 Python ${STANDALONE_VERSION}（约 25–70 MB，只用于 falcon）…`,
     );
     let data;
     try {

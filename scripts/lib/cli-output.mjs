@@ -11,7 +11,7 @@ export const muted = (value) => paint('2', value);
 export const resultLabel = (code, value) => paint(code === 0 ? '1;32' : '1;31', value);
 
 export function printPanel(title, description, sections = []) {
-    console.log(`\n  ${accent('LayaPilot')}  ${muted(title)}\n  ${description}`);
+    console.log(`\n  ${accent('fa CLI')}  ${muted(title)}\n  ${description}`);
     for (const [heading, lines] of sections) {
         console.log(`\n  ${accent(heading)}`);
         for (const line of lines) console.log(`    ${line}`);

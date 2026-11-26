@@ -1,8 +1,8 @@
-# LayaPilot · 企业管理后台自动化测试
+# falcon · 企业管理后台自动化测试
 
 [English](README.en.md) · [更新说明](references/changelog.md) · [下载 skill](https://github.com/anthonyli/laya-pilot/releases/latest) · [工作流程](docs/workflow.md) · [使用指南](references/workflows.md) · [配置说明](references/setup.md) · [看报告](references/reports.md) · [架构](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
 
-LayaPilot 在浏览器里执行测试用例，输出测试报告和失败证据。适用于企业后台的表格、筛选、表单和增删改查页面。
+falcon 在浏览器里执行测试用例，输出测试报告和失败证据。适用于企业后台的表格、筛选、表单和增删改查页面。
 
 ![公开 demo](docs/demo.png)
 
@@ -35,10 +35,10 @@ Excel 回放会直接定位名称和类型唯一匹配的控件。步骤与界�
 
 ### 1. 安装
 
-Falcon 桌面版随 DMG 自带 CLI，安装后即可在桌面录制和回放。要在终端或 CI 使用 `fa`，安装独立 CLI：
+falcon 桌面版随 DMG 自带 CLI，安装后即可在桌面录制和回放。要在终端或 CI 使用 `fa`，安装独立 CLI：
 
 ```bash
-npm install -g github:anthonyli/laya-pilot#v0.2.4
+npm install -g github:anthonyli/laya-pilot#v0.2.5
 fa --version
 ```
 
@@ -53,7 +53,7 @@ npm link            # 链接 fa 命令，并自动准备运行环境
 
 `npm link`（或 `npm install -g`）完成后会自动运行一次 `fa setup`：
 
-- **Python**：自动选用本机最新的 Python 3.10+；都没有时，下载一份只给 LayaPilot 用的独立 Python（约 25–70 MB）。系统自带的旧版本（如 macOS 的 3.9）会被跳过。
+- **Python**：自动选用本机最新的 Python 3.10+；都没有时，下载一份只给 falcon 用的独立 Python（约 25–70 MB）。系统自带的旧版本（如 macOS 的 3.9）会被跳过。
 - **浏览器**：优先使用本机已有的 Playwright Chromium、Chrome 或 Edge，都没有时才下载 Chromium。
 - 生成配置文件 `~/.falcon/.env.local`。
 
@@ -134,7 +134,7 @@ fa report runs/filter-check                # 在浏览器中打开 HTML 报告
 fa run --mode generate --url 'https://your-test-app.example/module' --read-only
 ```
 
-LayaPilot 会探索页面并实际执行，只导出断言通过的用例，保存在 `generated-cases/`。需要先审核用例再执行时，使用 [审核草稿流程](references/review-plan.md)。
+falcon 会探索页面并实际执行，只导出断言通过的用例，保存在 `generated-cases/`。需要先审核用例再执行时，使用 [审核草稿流程](references/review-plan.md)。
 
 ### 使用本地模型
 

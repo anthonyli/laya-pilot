@@ -398,9 +398,9 @@ export function renderIndex(view, assessment, files, hasTrace = false) {
         .join('');
     return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LayaPilot · ${escape(verdict.text)}</title>
+<title>falcon · ${escape(verdict.text)}</title>
 <style>${reportStyles}</style></head><body>
-<header class="masthead"><div class="brand-row"><div class="brand"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4l3-7 4 13 3-8h4"/></svg>LayaPilot</div>
+<header class="masthead"><div class="brand-row"><div class="brand"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4l3-7 4 13 3-8h4"/></svg>falcon</div>
 <small>生成于 ${escape(new Date().toLocaleString('zh-CN'))}</small></div></header>
 <main><h1>测试报告</h1>
 <p class="meta">${escape(view.kind)}${view.source ? ' · ' + escape(view.source) : ''}${view.provider ? ' · 模型：' + escape(view.provider) : ''}</p>

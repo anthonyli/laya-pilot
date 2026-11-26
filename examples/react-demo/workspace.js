@@ -91,7 +91,7 @@ function startWorkspace() {
                 <//>
             </div>
             <nav className="menu" id="workspace-menu">
-                <strong className="brand">LayaPilot</strong>
+                <strong className="brand">falcon</strong>
                 <h2>${center ? 'Indicator Center' : 'Workspace'}</h2>
                 ${
                     center

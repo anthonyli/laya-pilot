@@ -1,8 +1,8 @@
-# LayaPilot · Browser Tests for Enterprise Admin Applications
+# falcon · Browser Tests for Enterprise Admin Applications
 
 [中文](README.md) · [Changelog](references/changelog.md) · [Download skill](https://github.com/anthonyli/laya-pilot/releases/latest) · [Workflow](docs/workflow.en.md) · [Workflow guide](references/workflows.md) · [Setup](references/setup.md) · [Reading reports](references/reports.md) · [Architecture](docs/architecture.md) · [Issues](https://github.com/anthonyli/laya-pilot/issues)
 
-LayaPilot runs test cases in a browser and produces reports with failure evidence. It targets the tables, filters, forms and CRUD pages of enterprise admin applications.
+falcon runs test cases in a browser and produces reports with failure evidence. It targets the tables, filters, forms and CRUD pages of enterprise admin applications.
 
 ![Public demo](docs/demo.png)
 
@@ -18,7 +18,7 @@ Excel replay locates unique controls by name and role. When a step uses differen
 
 ## Choose how to use it
 
-There are two ways to use LayaPilot. **They are installed separately and do not share configuration.** Pick one:
+There are two ways to use falcon. **They are installed separately and do not share configuration.** Pick one:
 
 |               | `fa` command                | AI skill                                                                     |
 | ------------- | --------------------------- | ---------------------------------------------------------------------------- |
@@ -35,10 +35,10 @@ The options are identical: `fa X` corresponds to `node scripts/run.mjs X`, and `
 
 ### 1. Install
 
-The Falcon DMG bundles the CLI for recording and replay in the desktop app. To use `fa` in a terminal or CI, install the standalone CLI:
+The falcon DMG bundles the CLI for recording and replay in the desktop app. To use `fa` in a terminal or CI, install the standalone CLI:
 
 ```bash
-npm install -g github:anthonyli/laya-pilot#v0.2.4
+npm install -g github:anthonyli/laya-pilot#v0.2.5
 fa --version
 ```
 
@@ -53,7 +53,7 @@ npm link            # links the fa command and prepares the runtime
 
 `npm link` (or `npm install -g`) runs `fa setup` once automatically:
 
-- **Python**: the newest Python 3.10+ on this computer is used; if there is none, a private standalone Python (about 25–70 MB) is downloaded for LayaPilot. Older system versions such as macOS's 3.9 are skipped.
+- **Python**: the newest Python 3.10+ on this computer is used; if there is none, a private standalone Python (about 25–70 MB) is downloaded for falcon. Older system versions such as macOS's 3.9 are skipped.
 - **Browser**: an installed Playwright Chromium, Chrome or Edge is used first; Chromium is downloaded only when none is found.
 - The config file `~/.falcon/.env.local` is created.
 
@@ -134,7 +134,7 @@ Sequential recordings add a per-run suffix to eligible new record names and desc
 fa run --mode generate --url 'https://your-test-app.example/module' --read-only
 ```
 
-LayaPilot explores and executes the page, and exports only cases whose assertions passed, under `generated-cases/`. To review cases before execution, use the [review plan workflow](references/review-plan.md).
+falcon explores and executes the page, and exports only cases whose assertions passed, under `generated-cases/`. To review cases before execution, use the [review plan workflow](references/review-plan.md).
 
 ### Use a local model
 

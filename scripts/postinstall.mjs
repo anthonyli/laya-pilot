@@ -27,15 +27,15 @@ const skip =
 
 if (skip === 'development') process.exit(0);
 if (skip) {
-    console.log(`LayaPilot: 跳过自动准备运行环境（${skip}），之后运行 fa setup。`);
+    console.log(`fa CLI: 跳过自动准备运行环境（${skip}），之后运行 fa setup。`);
     process.exit(0);
 }
 
-console.log('LayaPilot: 准备运行环境（Python、openpyxl、浏览器），可随时用 fa setup 重新执行…');
+console.log('fa CLI: 准备运行环境（Python、openpyxl、浏览器），可随时用 fa setup 重新执行…');
 const result = spawnSync(process.execPath, [path.join(root, 'scripts', 'setup.mjs')], {
     stdio: 'inherit',
     env: { ...process.env, LAYA_ENTRY: 'cli' },
 });
 if (result.status !== 0)
-    console.log('LayaPilot: 运行环境没有准备完成，安装本身不受影响。请运行 fa setup 查看原因。');
+    console.log('fa CLI: 运行环境没有准备完成，安装本身不受影响。请运行 fa setup 查看原因。');
 process.exit(0);

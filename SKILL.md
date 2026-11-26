@@ -3,16 +3,16 @@ name: laya-pilot
 description: Run browser regression tests from user-provided Excel test cases for enterprise admin applications, preserving their steps and expected results and producing reports and failure evidence. Use for executing existing workbooks, providing a case template with examples, and analyzing regression runs. Case generation is optional and requires a user request. API access is the default; local model downloads require an explicit user request.
 ---
 
-# LayaPilot
+# falcon
 
 主要功能是执行用户已有的 Excel 测试用例做浏览器回归：读取用例，按原步骤和预期执行，输出报告与失败证据。本目录包含 skill 入口、运行代码、依赖清单和使用说明，克隆仓库或解压分发 ZIP 后均可直接安装，无需先构建。demo、开发测试和仓库维护文件仅在源码仓库中提供，不包含在交付包内。
 
 ## 两个用户入口
 
-| 功能               | 输入与入口                                   | 工作流                                                      | 输出                                                                    |
-| ------------------ | -------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 执行用例（主功能） | 用户现有或 LayaPilot 生成的 Excel；`--excel` | 自动识别格式 → 解析/校验 → 按步骤和预期执行 → 汇总报告      | JSON、Markdown 与浏览器证据；普通用例另有 CSV，结构化用例另有结果 Excel |
-| 生成用例（按需）   | 测试地址和允许的范围；`--mode generate`      | 观察页面 → 选择支持的测试 → 实际执行和断言 → 导出已验证用例 | 可执行 Excel、全部尝试结果表格和证据                                    |
+| 功能               | 输入与入口                                | 工作流                                                      | 输出                                                                    |
+| ------------------ | ----------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 执行用例（主功能） | 用户现有或 falcon 生成的 Excel；`--excel` | 自动识别格式 → 解析/校验 → 按步骤和预期执行 → 汇总报告      | JSON、Markdown 与浏览器证据；普通用例另有 CSV，结构化用例另有结果 Excel |
+| 生成用例（按需）   | 测试地址和允许的范围；`--mode generate`   | 观察页面 → 选择支持的测试 → 实际执行和断言 → 导出已验证用例 | 可执行 Excel、全部尝试结果表格和证据                                    |
 
 用户不需要区分普通 Excel 执行与结构化回放：`--excel` 根据隐藏计划或生成标记自动选择内部执行器；结构化计划校验失败就报错，不降级到普通解析。新生成文件移除隐藏计划后也会拒绝执行。旧 `--mode execute --case-file` 保留兼容，日常使用统一的 `--excel`。
 

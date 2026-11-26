@@ -101,7 +101,7 @@ function check(local, resolved) {
  */
 async function prepareBrowser() {
     const root = playwrightRoot();
-    if (!root) throw Error('Playwright is missing. Reinstall LayaPilot with npm.');
+    if (!root) throw Error('Playwright is missing. Reinstall the fa CLI with npm.');
     const configured = configuredChannel();
     if (configured && browserAvailable(configured)) return `${browserName(configured)}（已配置）`;
     if (configured && configured !== 'chromium') {
@@ -175,7 +175,7 @@ async function setupRuntime(args) {
     const local = args.includes('--local-model');
     await loadLocalEnvironment(dataRoot);
     initializeConfig();
-    console.log(`\n  ${accent('LayaPilot')}  setup · ${dataRoot}`);
+    console.log(`\n  ${accent('fa CLI')}  setup · ${dataRoot}`);
 
     step('Python 运行环境（读写 Excel）');
     const python = await preparePython(option(args, '--python'));
@@ -188,7 +188,7 @@ async function setupRuntime(args) {
         await run(npm, [...prefix, 'ci', '--omit=dev'], { cwd: skillRoot });
         done('Playwright');
     } else if (!playwrightRoot())
-        throw Error('Playwright is missing. Reinstall LayaPilot with npm.');
+        throw Error('Playwright is missing. Reinstall the fa CLI with npm.');
 
     step(local ? 'Python 依赖（含本地模型）' : 'Python 依赖');
     try {

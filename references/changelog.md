@@ -1,5 +1,10 @@
 # 更新说明
 
+## 0.2.5 — 2026-11-26
+
+- 帮助标题和安装提示显示为 `fa CLI`，新生成的 HTML 报告、示例页面和使用文档统一使用产品名 `falcon`。
+- 可从本版 GitHub Release 下载 CLI 安装包 `laya-pilot-0.2.5.tgz`，运行 `npm install -g ./laya-pilot-0.2.5.tgz` 安装，再用 `fa --version` 检查。
+
 ## 0.2.4 — 2026-11-26
 
 - 独立 CLI 的命令由 `laya` 改为 `fa`。脚本和 CI 请改用 `fa setup`、`fa check`、`fa run` 等命令。
