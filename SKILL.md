@@ -50,7 +50,7 @@ description: Run browser regression tests from user-provided Excel test cases fo
 ## 工作入口
 
 - 查询版本变更、升级兼容性与已知范围：读取 [references/changelog.md](references/changelog.md)。
-- 用户要求录制浏览器操作生成用例或回放录制：读取 [references/recording.md](references/recording.md)，使用本包的 `scripts/run.mjs record|replay|export-excel|report`，不要调用系统中的 `laya` 命令（它是独立安装，配置和版本可能与本 skill 不同）。
+- 用户要求录制浏览器操作生成用例或回放录制：读取 [references/recording.md](references/recording.md)，使用本包的 `scripts/run.mjs record|replay|export-excel|report`，不要调用系统中的 `fa` 命令（它是独立安装，配置和版本可能与本 skill 不同）。
 
 - 仅解读已有报告：读取用户指定运行目录的 `summary.md`、`results.json` 和 `cases/` 中的截图，目录结构和可靠性结论见 [references/reports.md](references/reports.md)；无须安装依赖、配置 API 或重新测试。
 - 安装、检查环境或配置模型：按需读取 [references/setup.md](references/setup.md)。

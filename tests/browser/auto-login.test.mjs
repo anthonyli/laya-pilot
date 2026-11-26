@@ -150,7 +150,7 @@ async function workbookReplay(root, url, recorded, passwords) {
         exec(
             process.execPath,
             [
-                path.join(project, 'bin/laya.mjs'),
+                path.join(project, 'bin/fa.mjs'),
                 'replay',
                 book,
                 '--url',

@@ -73,7 +73,7 @@ w.save("legacy.xlsx")
     env.LAYA_HOME = path.join(cwd, 'state');
     env.PYTHONPATH = path.join(root, 'tests/fixtures/local-model');
     for (const [out, entry] of [
-        ['cli', [path.join(root, 'bin/laya.mjs'), 'run', '--module-routes']],
+        ['cli', [path.join(root, 'bin/fa.mjs'), 'run', '--module-routes']],
         ['runner', [path.join(root, 'scripts/runner.mjs'), '--config']],
     ]) {
         await exec(

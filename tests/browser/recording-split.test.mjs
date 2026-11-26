@@ -103,7 +103,7 @@ test(
             const { stdout } = await exec(
                 process.execPath,
                 [
-                    path.join(root, 'bin/laya.mjs'),
+                    path.join(root, 'bin/fa.mjs'),
                     'replay',
                     workbook,
                     '--url',

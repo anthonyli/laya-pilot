@@ -20,14 +20,14 @@ Excel replay locates unique controls by name and role. When a step uses differen
 
 There are two ways to use LayaPilot. **They are installed separately and do not share configuration.** Pick one:
 
-|               | `laya` command                | AI skill                                                                     |
-| ------------- | ----------------------------- | ---------------------------------------------------------------------------- |
-| Best for      | Running cases yourself, CI    | Giving natural-language tasks in Cursor, Codex and similar tools             |
-| Install       | `npm link`, then `laya setup` | Place it in the AI tool's skill directory, then run `node scripts/setup.mjs` |
-| Configuration | `~/.laya/.env.local`          | `.env.local` in the skill directory                                          |
-| Commands      | `laya run …`                  | `node scripts/run.mjs …` (usually called by the AI)                          |
+|               | `fa` command                | AI skill                                                                     |
+| ------------- | --------------------------- | ---------------------------------------------------------------------------- |
+| Best for      | Running cases yourself, CI  | Giving natural-language tasks in Cursor, Codex and similar tools             |
+| Install       | `npm link`, then `fa setup` | Place it in the AI tool's skill directory, then run `node scripts/setup.mjs` |
+| Configuration | `~/.falcon/.env.local`      | `.env.local` in the skill directory                                          |
+| Commands      | `fa run …`                  | `node scripts/run.mjs …` (usually called by the AI)                          |
 
-The options are identical: `laya X` corresponds to `node scripts/run.mjs X`, and `laya setup` to `node scripts/setup.mjs`.
+The options are identical: `fa X` corresponds to `node scripts/run.mjs X`, and `fa setup` to `node scripts/setup.mjs`.
 
 **Requirements:** Node.js 20+ with npm only. The Python and browser used by Excel features are prepared automatically during installation, see below.
 
@@ -35,26 +35,35 @@ The options are identical: `laya X` corresponds to `node scripts/run.mjs X`, and
 
 ### 1. Install
 
+The Falcon DMG bundles the CLI for recording and replay in the desktop app. To use `fa` in a terminal or CI, install the standalone CLI:
+
+```bash
+npm install -g github:anthonyli/laya-pilot#v0.2.4
+fa --version
+```
+
+For development from a source checkout:
+
 ```bash
 git clone https://github.com/anthonyli/laya-pilot.git
 cd laya-pilot
 npm install
-npm link            # links the laya command and prepares the runtime
+npm link            # links the fa command and prepares the runtime
 ```
 
-`npm link` (or `npm install -g`) runs `laya setup` once automatically:
+`npm link` (or `npm install -g`) runs `fa setup` once automatically:
 
 - **Python**: the newest Python 3.10+ on this computer is used; if there is none, a private standalone Python (about 25–70 MB) is downloaded for LayaPilot. Older system versions such as macOS's 3.9 are skipped.
 - **Browser**: an installed Playwright Chromium, Chrome or Edge is used first; Chromium is downloaded only when none is found.
-- The config file `~/.laya/.env.local` is created.
+- The config file `~/.falcon/.env.local` is created.
 
-It does not run automatically under `sudo`, in CI or with `LAYA_SKIP_SETUP=1`; run `laya setup` yourself then. An incomplete setup (for example a network error) does not fail the installation, and rerunning `laya setup` reuses finished steps. Pick a Python with `laya setup --python python3.12`.
+It does not run automatically under `sudo`, in CI or with `LAYA_SKIP_SETUP=1`; run `fa setup` yourself then. An incomplete setup (for example a network error) does not fail the installation, and rerunning `fa setup` reuses finished steps. Pick a Python with `fa setup --python python3.12`.
 
-Configuration, the Python environment and models live in `~/.laya/` and survive reinstalling `laya`. Set `LAYA_HOME` to use another directory.
+As of v0.2.4, the command is `fa` (previously `laya`). Update scripts to use the new name. The default data directory changed from `~/.laya` to `~/.falcon`. It holds configuration, the Python environment, models and per-site login state. Set `LAYA_HOME` to specify a different directory. Existing data stays in the old directory until you move it yourself.
 
 ### 2. Configure the API
 
-Edit `~/.laya/.env.local`:
+Edit `~/.falcon/.env.local`:
 
 ```dotenv
 LAYA_API_BASE=https://your-gateway.example/v1
@@ -74,19 +83,19 @@ Pass the workbook path, page URL and output directory on each run instead of sto
 ### 3. Check and run
 
 ```bash
-laya check                                   # check dependencies and settings (does not contact the gateway)
-laya run --excel cases.xlsx --inspect        # check the workbook only, no browser
-laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
+fa check                                   # check dependencies and settings (does not contact the gateway)
+fa run --excel cases.xlsx --inspect        # check the workbook only, no browser
+fa run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
 ```
 
-Reports are written to `runs/laya-pilot/<run>/` in the current directory. All commands: `laya --help`.
+Reports are written to `runs/laya-pilot/<run>/` in the current directory. All commands: `fa --help`.
 
 ## Common tasks
 
 ### Regress an existing workbook
 
 ```bash
-laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
+fa run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
 ```
 
 - Existing workbooks need no conversion. Without cases, copy the [Excel template](assets/test-cases-template.xlsx) and edit its examples following the [template guide](references/case-template.md).
@@ -97,7 +106,7 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 ### Record actions as test cases
 
 ```bash
-laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
+fa record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
 ```
 
 1. Perform the workflow in the browser. Laya records your actions in order. Use the toolbar to mark a checkpoint or move the toolbar to the other edge.
@@ -105,24 +114,24 @@ laya record 'https://your-test-app.example/customers' --out recorded-cases/filte
 3. The “录制页面” worksheet lists visited same-origin URLs in order, including ordinary query parameters and hash routes. Unrecognized actions are marked in place, with later steps preserved. To generate independent cases, record with `--split-cases`. When replaying, use `--cases REC-001` to run a single case.
 
 ```bash
-laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
+fa replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
 ```
 
 For Playwright scripts only, without Excel or a model:
 
 ```bash
-laya setup --recording                       # install the browser only
-laya record 'https://your-test-app.example/customers' --code-only --out recorded-cases/filter.spec.cjs
-laya replay recorded-cases/filter.spec.cjs --out runs/filter-check
-laya report runs/filter-check                # open the HTML report
+fa setup --recording                       # install the browser only
+fa record 'https://your-test-app.example/customers' --code-only --out recorded-cases/filter.spec.cjs
+fa replay recorded-cases/filter.spec.cjs --out runs/filter-check
+fa report runs/filter-check                # open the HTML report
 ```
 
-Sequential recordings add a per-run suffix to eligible new record names and descriptions. Use `${runKey}` in workbook test data to generate other per-run values and reference them from steps and assertions. Convert an earlier recording with `laya export-excel FILE.spec.cjs`. See [Recording and replay](references/recording.md).
+Sequential recordings add a per-run suffix to eligible new record names and descriptions. Use `${runKey}` in workbook test data to generate other per-run values and reference them from steps and assertions. Convert an earlier recording with `fa export-excel FILE.spec.cjs`. See [Recording and replay](references/recording.md).
 
 ### Generate cases from a page
 
 ```bash
-laya run --mode generate --url 'https://your-test-app.example/module' --read-only
+fa run --mode generate --url 'https://your-test-app.example/module' --read-only
 ```
 
 LayaPilot explores and executes the page, and exports only cases whose assertions passed, under `generated-cases/`. To review cases before execution, use the [review plan workflow](references/review-plan.md).
@@ -130,8 +139,8 @@ LayaPilot explores and executes the page, and exports only cases whose assertion
 ### Use a local model
 
 ```bash
-laya setup --local-model                     # installs dependencies and downloads weights; needs extra disk and memory
-laya run --provider local --excel cases.xlsx --url URL --headless
+fa setup --local-model                     # installs dependencies and downloads weights; needs extra disk and memory
+fa run --provider local --excel cases.xlsx --url URL --headless
 ```
 
 Pass `--provider local` on every run. Without it the API is always used; installing weights does not switch the default. See [local model setup](references/setup.md#仅在用户明确要求时本地模型).
@@ -141,7 +150,7 @@ Pass `--provider local` on every run. Without it the API is always used; install
 1. Place the whole repository, or the `laya-pilot/` directory from the [Release ZIP](https://github.com/anthonyli/laya-pilot/releases/latest), in your AI tool's skill directory.
 2. Run `node scripts/setup.mjs` there, then fill in the API settings (same fields as above) in `.env.local` in that directory.
 
-The `laya` command is not needed. Then give tasks in natural language:
+The `fa` command is not needed. Then give tasks in natural language:
 
 ```text
 Use $laya-pilot to run every case in /absolute/path/cases.xlsx against https://your-test-app.example/module.
@@ -168,7 +177,7 @@ cases/         one directory per case with a screenshot for every step, e.g. 03-
 logs/          process files for troubleshooting
 ```
 
-Run `laya report` from the directory where you ran the test to open the latest report. Use `laya report RUN_DIR` to open a specific run. The top of the page gives the verdict: **passed with complete evidence**, **passed but needs review** or **failed**, with the reasons, such as blocked cases, unverified expectations, page or API errors, or missing screenshots. A pass count alone does not tell you whether the result can be trusted; read the verdict.
+Run `fa report` from the directory where you ran the test to open the latest report. Use `fa report RUN_DIR` to open a specific run. The top of the page gives the verdict: **passed with complete evidence**, **passed but needs review** or **failed**, with the reasons, such as blocked cases, unverified expectations, page or API errors, or missing screenshots. A pass count alone does not tell you whether the result can be trusted; read the verdict.
 
 - Generated cases go to `generated-cases/` and include only cases that executed and passed assertions.
 - A passing `--inspect` only means the workbook is valid; page assertions decide whether a test passes.
@@ -186,14 +195,14 @@ Coverage today focuses on admin tables, filters, forms and CRUD. Complex approva
 npm run demo        # then open http://127.0.0.1:8765/customers
 ```
 
-The same server hosts a React 16 + Ant Design 3 workspace at `/react-demo/`. Its libraries load from a CDN. Start a recording with `laya record http://127.0.0.1:8765/react-demo/`. Open **Indicator Center → Realtime Indicator**, switch between **Edit Area** and **Run Area**, then return to **Edit Area** and select **Add**. Choose a template in the drawer, fill out the configuration, and save it. Hover over a row icon to see its action. Choose **Go Online** and confirm to see that record in **Run Area**. Data is saved in the current browser.
+The same server hosts a React 16 + Ant Design 3 workspace at `/react-demo/`. Its libraries load from a CDN. Start a recording with `fa record http://127.0.0.1:8765/react-demo/`. Open **Indicator Center → Realtime Indicator**, switch between **Edit Area** and **Run Area**, then return to **Edit Area** and select **Add**. Choose a template in the drawer, fill out the configuration, and save it. Hover over a row icon to see its action. Choose **Go Online** and confirm to see that record in **Run Area**. Data is saved in the current browser.
 
 The demo page and cases are in [examples/](examples/); try `examples/demo-cases.xlsx` with the URL above. [Intro video](https://github.com/user-attachments/assets/940b2562-41ff-47ed-a6e0-e179d4d0847d) · [YouTube](https://www.youtube.com/watch?v=aIZEEcTGM0w)
 
 ## Development
 
 ```text
-bin/           laya command entry
+bin/           fa command entry
 scripts/       execution code (shared by the skill and the CLI), setup and packaging
 SKILL.md       AI skill entry
 references/    skill usage guides

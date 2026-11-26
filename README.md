@@ -20,14 +20,14 @@ Excel 回放会直接定位名称和类型唯一匹配的控件。步骤与界�
 
 有两种用法，**各自独立安装，配置不互通**，按需选一种即可：
 
-|          | 命令行 `laya`                  | AI skill                                                 |
-| -------- | ------------------------------ | -------------------------------------------------------- |
-| 适合     | 自己跑用例、接入 CI            | 在 Cursor、Codex 等工具里用自然语言下任务                |
-| 安装     | `npm link` 后运行 `laya setup` | 放进 AI 工具的 skill 目录后运行 `node scripts/setup.mjs` |
-| 配置文件 | `~/.laya/.env.local`           | skill 目录下的 `.env.local`                              |
-| 命令写法 | `laya run …`                   | `node scripts/run.mjs …`（通常由 AI 调用）               |
+|          | 命令行 `fa`                  | AI skill                                                 |
+| -------- | ---------------------------- | -------------------------------------------------------- |
+| 适合     | 自己跑用例、接入 CI          | 在 Cursor、Codex 等工具里用自然语言下任务                |
+| 安装     | `npm link` 后运行 `fa setup` | 放进 AI 工具的 skill 目录后运行 `node scripts/setup.mjs` |
+| 配置文件 | `~/.falcon/.env.local`       | skill 目录下的 `.env.local`                              |
+| 命令写法 | `fa run …`                   | `node scripts/run.mjs …`（通常由 AI 调用）               |
 
-两者参数相同：`laya X` 对应 `node scripts/run.mjs X`，`laya setup` 对应 `node scripts/setup.mjs`。
+两者参数相同：`fa X` 对应 `node scripts/run.mjs X`，`fa setup` 对应 `node scripts/setup.mjs`。
 
 **环境要求：** 只需要 Node.js 20+（含 npm）。Excel 功能用到的 Python 和浏览器由安装过程自动准备，见下文。
 
@@ -35,26 +35,35 @@ Excel 回放会直接定位名称和类型唯一匹配的控件。步骤与界�
 
 ### 1. 安装
 
+Falcon 桌面版随 DMG 自带 CLI，安装后即可在桌面录制和回放。要在终端或 CI 使用 `fa`，安装独立 CLI：
+
+```bash
+npm install -g github:anthonyli/laya-pilot#v0.2.4
+fa --version
+```
+
+从源码开发时可以使用 `npm link`：
+
 ```bash
 git clone https://github.com/anthonyli/laya-pilot.git
 cd laya-pilot
 npm install
-npm link            # 链接 laya 命令，并自动准备运行环境
+npm link            # 链接 fa 命令，并自动准备运行环境
 ```
 
-`npm link`（或 `npm install -g`）完成后会自动运行一次 `laya setup`：
+`npm link`（或 `npm install -g`）完成后会自动运行一次 `fa setup`：
 
 - **Python**：自动选用本机最新的 Python 3.10+；都没有时，下载一份只给 LayaPilot 用的独立 Python（约 25–70 MB）。系统自带的旧版本（如 macOS 的 3.9）会被跳过。
 - **浏览器**：优先使用本机已有的 Playwright Chromium、Chrome 或 Edge，都没有时才下载 Chromium。
-- 生成配置文件 `~/.laya/.env.local`。
+- 生成配置文件 `~/.falcon/.env.local`。
 
-用 `sudo` 安装、在 CI 中，或设置了 `LAYA_SKIP_SETUP=1` 时不会自动执行，之后手动运行 `laya setup` 即可。网络中断等原因没装完也不影响安装本身，重新运行 `laya setup` 会复用已完成的步骤。需要指定 Python 时用 `laya setup --python python3.12`。
+用 `sudo` 安装、在 CI 中，或设置了 `LAYA_SKIP_SETUP=1` 时不会自动执行，之后手动运行 `fa setup` 即可。网络中断等原因没装完也不影响安装本身，重新运行 `fa setup` 会复用已完成的步骤。需要指定 Python 时用 `fa setup --python python3.12`。
 
-配置、Python 环境和模型都放在 `~/.laya/`，重装 `laya` 不会丢失。需要换目录时设置环境变量 `LAYA_HOME`。
+v0.2.4 起，命令由 `laya` 改为 `fa`，默认数据目录由 `~/.laya` 改为 `~/.falcon`。脚本中的命令也需要改为 `fa`。新目录保存配置、Python 环境、模型和按站点保存的登录态；可以用 `LAYA_HOME` 指定其他目录。旧目录中的数据不会自动迁移。
 
 ### 2. 配置 API
 
-编辑 `~/.laya/.env.local`：
+编辑 `~/.falcon/.env.local`：
 
 ```dotenv
 LAYA_API_BASE=https://your-gateway.example/v1
@@ -74,19 +83,19 @@ Excel 路径、页面地址和输出目录在每次运行时通过参数传入�
 ### 3. 检查并运行
 
 ```bash
-laya check                                   # 检查依赖和配置是否齐全（不测试网关连通性）
-laya run --excel cases.xlsx --inspect        # 只检查用例文件，不打开浏览器
-laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
+fa check                                   # 检查依赖和配置是否齐全（不测试网关连通性）
+fa run --excel cases.xlsx --inspect        # 只检查用例文件，不打开浏览器
+fa run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
 ```
 
-报告写在当前目录的 `runs/laya-pilot/<本轮>/`。查看全部命令：`laya --help`。
+报告写在当前目录的 `runs/laya-pilot/<本轮>/`。查看全部命令：`fa --help`。
 
 ## 常用任务
 
 ### 回归已有 Excel
 
 ```bash
-laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
+fa run --excel cases.xlsx --url 'https://your-test-app.example/module' --headless
 ```
 
 - 已有 Excel 不需要转换格式。没有用例时，可以复制 [Excel 模板](assets/test-cases-template.xlsx)，按 [填写说明](references/case-template.md) 修改其中的示例。
@@ -97,7 +106,7 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 ### 录制操作，生成用例
 
 ```bash
-laya record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
+fa record 'https://your-test-app.example/customers' --out recorded-cases/filter.spec.cjs
 ```
 
 1. 在打开的浏览器里完成操作。Laya 按顺序记录操作，可用「添加检查点」手动标记要验证的内容。
@@ -105,24 +114,24 @@ laya record 'https://your-test-app.example/customers' --out recorded-cases/filte
 3. Excel 的「录制页面」表按顺序列出本次实际访问的同源页面，保留普通查询参数与哈希路由。未识别的操作会在原位置标为「待补录」，后续步骤继续保存。需要独立用例时，录制时加 `--split-cases`。回放 Excel 可加 `--cases REC-001` 单独执行一条用例。
 
 ```bash
-laya replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
+fa replay recorded-cases/filter.xlsx --url 'https://your-test-app.example/customers' --headless
 ```
 
 只要 Playwright 脚本、不使用 Excel 和模型时：
 
 ```bash
-laya setup --recording                       # 只安装浏览器
-laya record 'https://your-test-app.example/customers' --code-only --out recorded-cases/filter.spec.cjs
-laya replay recorded-cases/filter.spec.cjs --out runs/filter-check
-laya report runs/filter-check                # 在浏览器中打开 HTML 报告
+fa setup --recording                       # 只安装浏览器
+fa record 'https://your-test-app.example/customers' --code-only --out recorded-cases/filter.spec.cjs
+fa replay recorded-cases/filter.spec.cjs --out runs/filter-check
+fa report runs/filter-check                # 在浏览器中打开 HTML 报告
 ```
 
-连续回放时，符合条件的新增名称和描述会自动带上本轮唯一后缀。其他测试值可在 Excel「测试数据」列用 `${runKey}` 生成，并在步骤和预期中复用。之前录好的脚本可以用 `laya export-excel FILE.spec.cjs` 转成 Excel。更多说明见 [录制与回放](references/recording.md)。
+连续回放时，符合条件的新增名称和描述会自动带上本轮唯一后缀。其他测试值可在 Excel「测试数据」列用 `${runKey}` 生成，并在步骤和预期中复用。之前录好的脚本可以用 `fa export-excel FILE.spec.cjs` 转成 Excel。更多说明见 [录制与回放](references/recording.md)。
 
 ### 从页面生成用例
 
 ```bash
-laya run --mode generate --url 'https://your-test-app.example/module' --read-only
+fa run --mode generate --url 'https://your-test-app.example/module' --read-only
 ```
 
 LayaPilot 会探索页面并实际执行，只导出断言通过的用例，保存在 `generated-cases/`。需要先审核用例再执行时，使用 [审核草稿流程](references/review-plan.md)。
@@ -130,8 +139,8 @@ LayaPilot 会探索页面并实际执行，只导出断言通过的用例，保�
 ### 使用本地模型
 
 ```bash
-laya setup --local-model                     # 安装依赖并下载模型权重，需要较多磁盘和内存
-laya run --provider local --excel cases.xlsx --url URL --headless
+fa setup --local-model                     # 安装依赖并下载模型权重，需要较多磁盘和内存
+fa run --provider local --excel cases.xlsx --url URL --headless
 ```
 
 每次运行都要传 `--provider local`。不传时始终使用 API，安装了模型也不会自动切换。详见 [本地模型配置](references/setup.md#仅在用户明确要求时本地模型)。
@@ -141,7 +150,7 @@ laya run --provider local --excel cases.xlsx --url URL --headless
 1. 把整个仓库，或 [Release ZIP](https://github.com/anthonyli/laya-pilot/releases/latest) 中的 `laya-pilot/` 目录，放进 AI 工具的 skill 目录。
 2. 在该目录运行 `node scripts/setup.mjs`，然后在同一目录的 `.env.local` 中填写 API 配置（字段同上）。
 
-不需要安装 `laya` 命令。之后直接用自然语言下任务：
+不需要安装 `fa` 命令。之后直接用自然语言下任务：
 
 ```text
 用 $laya-pilot 执行 /absolute/path/cases.xlsx 的全部用例，目标地址是 https://your-test-app.example/module。
@@ -167,7 +176,7 @@ cases/         每条用例一个目录，每一步都有截图，如 03-预期2
 logs/          过程文件，排查时再看
 ```
 
-在执行测试的目录运行 `laya report`，即可打开最新一轮报告。用 `laya report RUN_DIR` 打开指定一轮。页面顶部给出结论：**通过，证据完整** / **通过，但需要复核** / **未通过**，并列出原因，比如阻断、预期未验证、页面或接口报错、截图缺失。只看“通过 N 条”不足以判断结果是否可信，以这一栏为准。
+在执行测试的目录运行 `fa report`，即可打开最新一轮报告。用 `fa report RUN_DIR` 打开指定一轮。页面顶部给出结论：**通过，证据完整** / **通过，但需要复核** / **未通过**，并列出原因，比如阻断、预期未验证、页面或接口报错、截图缺失。只看“通过 N 条”不足以判断结果是否可信，以这一栏为准。
 
 - 生成的用例保存在 `generated-cases/`，只收录实际执行且断言通过的用例。
 - `--inspect` 通过只说明用例文件没问题，测试是否通过以页面断言为准。
@@ -188,7 +197,7 @@ npm run demo        # 然后打开 http://127.0.0.1:8765/customers
 同一个服务的 `/react-demo/` 提供 React 16 + Ant Design 3 工作台，浏览器从 CDN 加载依赖。可直接从工作台首页开始录制。
 
 ```bash
-laya record http://127.0.0.1:8765/react-demo/
+fa record http://127.0.0.1:8765/react-demo/
 ```
 
 点击左侧的 **Indicator Center** 图标，进入 **Realtime Indicator**，依次切换 **Edit Area → Run Area → Edit Area**。点击 **Add**，在抽屉选择模板并填写配置，点击 **Save**。在新记录的操作列悬停可查看编辑、上线及删除图标的名称。点击 **Go Online** 并确认后，可以在 **Run Area** 找到该记录。演示数据保存在当前浏览器。
@@ -198,7 +207,7 @@ laya record http://127.0.0.1:8765/react-demo/
 ## 开发
 
 ```text
-bin/           laya 命令入口
+bin/           fa 命令入口
 scripts/       执行代码（skill 和命令行共用）、安装和打包脚本
 SKILL.md       AI skill 入口
 references/    skill 的使用说明

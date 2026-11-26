@@ -51,7 +51,7 @@ test('press a key in the second input', async ({ page }) => {
     env.PYTHONPATH = path.join(root, 'tests/fixtures/local-model');
     const python = process.env.LAYA_TEST_PYTHON || process.env.LAYA_PYTHON || 'python3';
     const laya = (...args) =>
-        exec(process.execPath, [path.join(root, 'bin/laya.mjs'), ...args], { cwd, env });
+        exec(process.execPath, [path.join(root, 'bin/fa.mjs'), ...args], { cwd, env });
     await laya('replay', spec, '--out', 'playwright');
     await laya('export-excel', spec, '--out', workbook, '--python', python);
     await laya(

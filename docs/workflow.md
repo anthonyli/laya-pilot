@@ -7,7 +7,7 @@
 ```mermaid
 flowchart TD
     skill["AI skill<br/>node scripts/run.mjs<br/>配置：skill 目录/.env.local"]
-    cli["命令行 laya<br/>bin/laya.mjs<br/>配置：~/.laya/.env.local"]
+    cli["命令行 fa<br/>bin/fa.mjs<br/>配置：~/.falcon/.env.local"]
     skill --> entry
     cli --> entry
     entry["lib/entry.mjs + common.mjs<br/>决定配置目录与命令写法<br/>读取配置：命令行 > 环境变量 > .env.local > 默认值"]
@@ -41,17 +41,17 @@ flowchart TD
 
 ## 各环节说明
 
-| 环节       | 入口                                      | 做什么                                                                  |
-| ---------- | ----------------------------------------- | ----------------------------------------------------------------------- |
-| 安装与检查 | `laya setup` / `laya check`               | 安装 Python 环境、openpyxl、Chromium；检查依赖和 API 配置是否齐全       |
-| 检查用例   | `laya run --excel FILE --inspect`         | 只解析和诊断 Excel，不打开浏览器、不调用模型                            |
-| 回归 Excel | `laya run --excel FILE --url URL`         | 普通用例经 `worker.py` 读取后由 Engine 执行；结构化计划由 workflow 执行 |
-| 生成用例   | `laya run --mode generate --url URL`      | 探索页面并实际执行，只导出断言通过的用例                                |
-| 审核后执行 | `--mode plan` → `--mode reviewed`         | 先离线出草稿和摘要，用户批准该摘要后才执行，审核和执行分开              |
-| 录制       | `laya record URL`                         | 浏览器中操作并标记断言，同时保存 Excel 和 Playwright 脚本               |
-| 回放       | `laya replay FILE.xlsx` / `FILE.spec.cjs` | Excel 交给 Laya 执行器；`.spec.cjs` 交给 Playwright Test                |
+| 环节       | 入口                                    | 做什么                                                                  |
+| ---------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| 安装与检查 | `fa setup` / `fa check`                 | 安装 Python 环境、openpyxl、Chromium；检查依赖和 API 配置是否齐全       |
+| 检查用例   | `fa run --excel FILE --inspect`         | 只解析和诊断 Excel，不打开浏览器、不调用模型                            |
+| 回归 Excel | `fa run --excel FILE --url URL`         | 普通用例经 `worker.py` 读取后由 Engine 执行；结构化计划由 workflow 执行 |
+| 生成用例   | `fa run --mode generate --url URL`      | 探索页面并实际执行，只导出断言通过的用例                                |
+| 审核后执行 | `--mode plan` → `--mode reviewed`       | 先离线出草稿和摘要，用户批准该摘要后才执行，审核和执行分开              |
+| 录制       | `fa record URL`                         | 浏览器中操作并标记断言，同时保存 Excel 和 Playwright 脚本               |
+| 回放       | `fa replay FILE.xlsx` / `FILE.spec.cjs` | Excel 交给 Laya 执行器；`.spec.cjs` 交给 Playwright Test                |
 
-skill 中把 `laya X` 换成 `node scripts/run.mjs X`，`laya setup` 换成 `node scripts/setup.mjs`。
+skill 中把 `fa X` 换成 `node scripts/run.mjs X`，`fa setup` 换成 `node scripts/setup.mjs`。
 
 ## 关键规则
 

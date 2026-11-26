@@ -365,7 +365,7 @@ book.save(sys.argv[1])
             const executed = await run(
                 process.execPath,
                 [
-                    path.join(root, 'bin/laya.mjs'),
+                    path.join(root, 'bin/fa.mjs'),
                     'replay',
                     workbook,
                     '--url',

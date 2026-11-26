@@ -31,7 +31,7 @@ def runtime_package_files(files):
     """Keep locked runtime dependencies without repository-only commands or dev tools."""
     package = json.loads(files['package.json'])
     package.pop('devDependencies', None)
-    # The npm `laya` command is a separate distribution; the skill runs scripts/run.mjs.
+    # The npm `fa` command is a separate distribution; the skill runs scripts/run.mjs.
     package.pop('bin', None)
     package.pop('files', None)
     package['scripts'] = {'start': 'node scripts/run.mjs'}

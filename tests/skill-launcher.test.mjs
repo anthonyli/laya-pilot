@@ -206,7 +206,7 @@ test('setup check and launcher resolve the same environment and redact secrets i
     assert.equal(override.config.sources.apiModel, 'cli');
 });
 
-test('skill help names only bundled scripts, never the laya command', async (t) => {
+test('skill help names only bundled scripts, never the fa command', async (t) => {
     const { skill, cwd, env } = await fixture(t);
     const help = (...args) =>
         spawnSync(process.execPath, [path.join(skill, 'scripts', 'run.mjs'), ...args], {
@@ -217,10 +217,7 @@ test('skill help names only bundled scripts, never the laya command', async (t) 
     for (const args of [['--help'], ['help', 'run'], ['record', '--help'], ['replay', '--help']]) {
         const result = help(...args);
         assert.equal(result.status, 0, result.stderr);
-        assert.doesNotMatch(
-            result.stdout,
-            /\blaya (?:setup|check|run|record|replay|report|help)\b/,
-        );
+        assert.doesNotMatch(result.stdout, /\bfa (?:setup|check|run|record|replay|report|help)\b/);
         assert.doesNotMatch(result.stdout, /\u001b\[/);
     }
     const home = help('--help').stdout;
@@ -237,27 +234,27 @@ test('skill help names only bundled scripts, never the laya command', async (t) 
             encoding: 'utf8',
         },
     );
-    assert.doesNotMatch(setup.stdout, /\blaya (?:setup|check)\b/);
+    assert.doesNotMatch(setup.stdout, /\bfa (?:setup|check)\b/);
 });
 
-test('laya command keeps its own help and stores state in LAYA_HOME, not the package', async (t) => {
+test('fa command keeps its own help and stores state in LAYA_HOME, not the package', async (t) => {
     const { skill, cwd, env } = await fixture(t);
-    const home = path.join(cwd, 'laya home');
-    const laya = (...args) =>
-        spawnSync(process.execPath, [path.join(skill, 'bin', 'laya.mjs'), ...args], {
+    const home = path.join(cwd, 'fa home');
+    const fa = (...args) =>
+        spawnSync(process.execPath, [path.join(skill, 'bin', 'fa.mjs'), ...args], {
             cwd,
             env: { ...env, LAYA_HOME: home },
             encoding: 'utf8',
         });
-    const help = laya('--help');
+    const help = fa('--help');
     assert.equal(help.status, 0, help.stderr);
-    assert.match(help.stdout, /laya setup --recording/);
-    assert.match(help.stdout, /laya record URL/);
+    assert.match(help.stdout, /fa setup --recording/);
+    assert.match(help.stdout, /fa record URL/);
     assert.doesNotMatch(help.stdout, /node scripts\/|references\/|--mode generate/);
-    assert.match(laya('help', 'run').stdout, /laya run --mode generate/);
+    assert.match(fa('help', 'run').stdout, /fa run --mode generate/);
 
     // A fresh install has no venv: check reports missing items instead of crashing.
-    const check = laya('check');
+    const check = fa('check');
     assert.equal(check.status, 1);
     assert.doesNotMatch(check.stderr, /cannot be empty/);
     assert.match(check.stdout, /MISSING Python 3\.10\+/);
@@ -274,7 +271,7 @@ test('laya command keeps its own help and stores state in LAYA_HOME, not the pac
     await fs.writeFile(path.join(home, '.env.local'), 'LAYA_API_MODEL=from-cli-home\n');
     await fs.writeFile(path.join(skill, '.env.local'), 'LAYA_API_MODEL=from-skill\n');
     const cliConfig = JSON.parse(
-        laya('check')
+        fa('check')
             .stdout.split('\n')
             .find((line) => line.startsWith('CONFIG '))
             .slice(7),

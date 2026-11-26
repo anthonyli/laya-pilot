@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { findPython, probePython, rememberSetting } from '../scripts/lib/runtime-setup.mjs';
 
 const exec = promisify(execFile);
-const cli = fileURLToPath(new URL('../bin/laya.mjs', import.meta.url));
+const cli = fileURLToPath(new URL('../bin/fa.mjs', import.meta.url));
 const cwd = fileURLToPath(new URL('../', import.meta.url));
 
 test('python probe reports the version it rejected', async (t) => {

@@ -15,7 +15,7 @@ import {
 import { assess, finalizeRun, latestReportIndex, outcome } from '../scripts/lib/run-index.mjs';
 
 const exec = promisify(execFile);
-const cli = fileURLToPath(new URL('../bin/laya.mjs', import.meta.url));
+const cli = fileURLToPath(new URL('../bin/fa.mjs', import.meta.url));
 
 test('case directories are ordered, readable and stay inside cases/', () => {
     assert.equal(caseDirectory(1, '001', '标题检查'), 'cases/001-标题检查');

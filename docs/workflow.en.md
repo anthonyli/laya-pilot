@@ -7,7 +7,7 @@
 ```mermaid
 flowchart TD
     skill["AI skill<br/>node scripts/run.mjs<br/>config: skill directory/.env.local"]
-    cli["laya command<br/>bin/laya.mjs<br/>config: ~/.laya/.env.local"]
+    cli["fa command<br/>bin/fa.mjs<br/>config: ~/.falcon/.env.local"]
     skill --> entry
     cli --> entry
     entry["lib/entry.mjs + common.mjs<br/>choose config directory and command spelling<br/>precedence: CLI > environment > .env.local > defaults"]
@@ -41,17 +41,17 @@ flowchart TD
 
 ## Stages
 
-| Stage            | Entry                                     | What it does                                                                    |
-| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
-| Setup and check  | `laya setup` / `laya check`               | Install Python venv, openpyxl and Chromium; check dependencies and API settings |
-| Inspect cases    | `laya run --excel FILE --inspect`         | Parse and diagnose the workbook without a browser or model                      |
-| Excel regression | `laya run --excel FILE --url URL`         | Ordinary cases: `worker.py` then Engine; structured plans: workflow             |
-| Generate cases   | `laya run --mode generate --url URL`      | Explore and execute the page; export only cases whose assertions passed         |
-| Review first     | `--mode plan` → `--mode reviewed`         | Draft offline with a digest; execute only after that digest is approved         |
-| Record           | `laya record URL`                         | Act in the browser and mark assertions; saves Excel and the Playwright script   |
-| Replay           | `laya replay FILE.xlsx` / `FILE.spec.cjs` | Excel goes to the Laya runner; `.spec.cjs` goes to Playwright Test              |
+| Stage            | Entry                                   | What it does                                                                    |
+| ---------------- | --------------------------------------- | ------------------------------------------------------------------------------- |
+| Setup and check  | `fa setup` / `fa check`                 | Install Python venv, openpyxl and Chromium; check dependencies and API settings |
+| Inspect cases    | `fa run --excel FILE --inspect`         | Parse and diagnose the workbook without a browser or model                      |
+| Excel regression | `fa run --excel FILE --url URL`         | Ordinary cases: `worker.py` then Engine; structured plans: workflow             |
+| Generate cases   | `fa run --mode generate --url URL`      | Explore and execute the page; export only cases whose assertions passed         |
+| Review first     | `--mode plan` → `--mode reviewed`       | Draft offline with a digest; execute only after that digest is approved         |
+| Record           | `fa record URL`                         | Act in the browser and mark assertions; saves Excel and the Playwright script   |
+| Replay           | `fa replay FILE.xlsx` / `FILE.spec.cjs` | Excel goes to the Laya runner; `.spec.cjs` goes to Playwright Test              |
 
-In the skill, replace `laya X` with `node scripts/run.mjs X` and `laya setup` with `node scripts/setup.mjs`.
+In the skill, replace `fa X` with `node scripts/run.mjs X` and `fa setup` with `node scripts/setup.mjs`.
 
 ## Rules
 

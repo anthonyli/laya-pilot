@@ -12,7 +12,7 @@ node scripts/run.mjs replay recorded-cases/filter.xlsx --url 'https://test.examp
 3. 若要按已观察到的业务结果拆成独立用例，录制时加 `--split-cases`。拆分后可用 `--cases REC-003` 单独回放某条用例。编辑和删除同次录制中新增的记录时，用例会在自己的步骤里先创建一条独立测试记录。仅录了对既有数据的编辑或删除时，Excel 会注明缺少可复用的准备步骤。涉及写入时，在专用测试环境显式加 `--allow-write`。
 4. 执行 `node scripts/run.mjs report` 打开最新报告，查看结论和每一步的截图。用 `report RUN_DIR` 查看指定一轮。目录说明见 [测试报告怎么看](reports.md)。指定 `--out DIR` 可选择产物目录。
 
-默认录制识别到登录成功后，按站点（协议、主机、端口）和账号在本地保存浏览器会话。CLI 使用 `~/.laya/.auth/recordings/`，设置了 `LAYA_HOME` 时使用该目录；skill 使用自己的 `.auth/recordings/`。下次录制或回放 Excel 会先打开登录后的页面验证会话。已认证时，登录场景在报告中标为「不适用」，后续场景继续执行。录制中成功登录后，账号密码及登录控件信息会按站点和账号加密保存。会话过期时，录制和 Excel 回放会自动使用对应凭据登录，验证通过后更新 auth 并继续用例。`record --auth-reset` 开启新的登录会话。多个账号可用 `--user` 选择，自定义登录页可用 `--user` 和 `--auth-check` 指定账号及登录后唯一可见的标记。已有显式回放配置 `--auth-state` 优先。
+默认录制识别到登录成功后，按站点（协议、主机、端口）和账号在本地保存浏览器会话。CLI 使用 `~/.falcon/.auth/recordings/`，设置了 `LAYA_HOME` 时使用该目录；skill 使用自己的 `.auth/recordings/`。下次录制或回放 Excel 会先打开登录后的页面验证会话。已认证时，登录场景在报告中标为「不适用」，后续场景继续执行。录制中成功登录后，账号密码及登录控件信息会按站点和账号加密保存。会话过期时，录制和 Excel 回放会自动使用对应凭据登录，验证通过后更新 auth 并继续用例。`record --auth-reset` 开启新的登录会话。多个账号可用 `--user` 选择，自定义登录页可用 `--user` 和 `--auth-check` 指定账号及登录后唯一可见的标记。已有显式回放配置 `--auth-state` 优先。
 
 凭据位于数据目录的 `.auth/credentials/`，本地密钥是 `.auth/credentials.key`，文件权限为当前用户可读写。密码通过独立的凭据通道保存，录制用例中的密码输入仍标记为敏感步骤。旧版只保存了会话，需要在录制浏览器里再成功登录一次，或通过 `--user` 配合隐藏输入或 `TEST_PASSWORD` 登录，以建立可续期凭据。验证码或多因素验证需要人工完成。
 
@@ -65,8 +65,8 @@ Excel 观察页面错误、浏览器异常、请求失败以及接口返回的�
 ```
 
 ```sh
-laya record "$TEST_URL" --ui-adapter ./ui-adapter.json
-laya replay recorded-cases/case.xlsx --url "$TEST_URL" --ui-adapter ./ui-adapter.json
+fa record "$TEST_URL" --ui-adapter ./ui-adapter.json
+fa replay recorded-cases/case.xlsx --url "$TEST_URL" --ui-adapter ./ui-adapter.json
 ```
 
 Excel 保留字段名称和选项值，回放时加载当前项目的适配文件。配套的 Playwright 脚本内嵌录制时的选择器。自定义弹层可以通过 `aria-controls` 指向页面其他位置的选项列表。无法唯一确认字段、选项或表格记录时，录制会在原位标记待补录，回放会在对应步骤说明原因。
@@ -81,4 +81,4 @@ Excel 回放会直接操作当前范围内名称和类型唯一匹配的控件�
 
 下拉选项的名称与可见性由通用适配层统一处理，录制、Excel 回放和独立脚本使用同一规则：优先读取选项自身的 `aria-labelledby` / `aria-label`，其次读取可见文字和标题。子图标的无障碍名称不会拼入选项值，隐藏或 `aria-hidden` 的副本不参与匹配；所属列表中存在多个同名选项时仍会停止。
 
-独立安装的 `laya` 命令用法相同，把 `node scripts/run.mjs` 换成 `laya`、`node scripts/setup.mjs` 换成 `laya setup` 即可；两者的配置互不共享。
+独立安装的 `fa` 命令用法相同，把 `node scripts/run.mjs` 换成 `fa`、`node scripts/setup.mjs` 换成 `fa setup` 即可；两者的配置互不共享。

@@ -552,7 +552,7 @@ test(
             PYTHONPATH: path.join(project, 'tests/fixtures/local-model'),
         };
         const args = [
-            path.join(project, 'bin/laya.mjs'),
+            path.join(project, 'bin/fa.mjs'),
             'replay',
             book,
             '--url',

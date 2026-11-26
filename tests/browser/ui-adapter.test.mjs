@@ -157,7 +157,7 @@ test(
             LAYA_HOME: path.join(directory, 'runtime'),
             PYTHONPATH: path.join(root, 'tests/fixtures/local-model'),
         };
-        const cli = path.join(root, 'bin/laya.mjs');
+        const cli = path.join(root, 'bin/fa.mjs');
         const excelOut = path.join(directory, 'excel-report');
         await exec(
             process.execPath,
