@@ -90,6 +90,7 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 ```
 
 - Existing workbooks need no conversion. Without cases, copy the [Excel template](assets/test-cases-template.xlsx) and edit its examples following the [template guide](references/case-template.md).
+- For menu-only navigation steps, pass `--module-routes routes.json`, for example `{"moduleRoutes":{"Finance → Refunds":"/refunds"}}`. The runner tries the menu first and uses the same-origin URL if the menu is missing. Button actions and visibility checks still use the live page.
 - All cases run by default. Steps and expectations are kept as written, and the input workbook is never modified.
 - Cases that create, edit or delete data need `--allow-write` in a test environment.
 

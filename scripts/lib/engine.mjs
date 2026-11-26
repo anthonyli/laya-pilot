@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { moduleRouteFor } from './project-config.mjs';
 import { CaseDirectories, slug } from './run-layout.mjs';
 import { resolveUiAdapters } from './ui-adapters.mjs';
 import { replayEditorOperation } from './recorded-editor.mjs';
@@ -357,6 +358,9 @@ export class Engine {
             const rowKey = ordinal ? undefined : await this.targetRow(name);
             found = await this.chooseTarget(name, 'click', { rowKey, ordinal });
         }
+        return this.clickTarget(found, step, recordedRole);
+    }
+    async clickTarget(found, step, recordedRole) {
         try {
             this.guard(found.control, step);
             if (this.pendingPreconditions?.length && this.isWriteControl(found.control, step))
@@ -382,6 +386,37 @@ export class Engine {
             if (recordedRole === 'fieldOption' || recordedRole === 'option')
                 await found.locator.dispose();
         }
+    }
+    async followMenu(parts, text) {
+        const route = moduleRouteFor(this.config.moduleRoutes, parts);
+        const leaf = parts.at(-1);
+        const snapshot = await observe(this.page);
+        const actualLeaf = this.config.labels?.[leaf] || leaf;
+        const candidates = snapshot.controls.filter((c) => norm(c.name) === norm(actualLeaf));
+        let control;
+        for (const part of candidates.length === 1 ? [leaf] : parts) {
+            if (!route) {
+                control = await this.directClick(part, text);
+                continue;
+            }
+            const found = await this.chooseTarget(part, 'click', { requireMenu: true });
+            if (found) {
+                control = await this.clickTarget(found, text);
+                continue;
+            }
+            await this.navigate(route);
+            const failure = this.failures
+                .slice(this.navFailureStart)
+                .find((f) => f.resourceType === 'document' && f.path === new URL(route).pathname);
+            if (failure || this.page.url() !== route)
+                throw new Halt(
+                    '模块页面未到达',
+                    failure ? '模块页面 HTTP ' + failure.status : '页面已跳转到其它地址',
+                );
+            console.log('  菜单未找到，通过模块映射进入：' + parts.join(' → '));
+            return { action: 'module-route' };
+        }
+        return { action: 'path', control };
     }
     async revealRowMenu(name) {
         if (!this.rowKey) return;
@@ -690,7 +725,11 @@ export class Engine {
         if (diagnosis.status === 'needs-data')
             throw new Halt('缺少测试数据', diagnosis.message + '；' + diagnosis.suggestion);
         const snap = await observe(this.page);
-        let specs = expandStep(text, { controls: snap.controls, area: this.area });
+        let specs = expandStep(text, {
+            controls: snap.controls,
+            area: this.area,
+            moduleRoutes: this.config.moduleRoutes,
+        });
         if (!specs.length)
             specs = await semanticStep(text, snap, this.laya, {
                 meta: { case: this.current?.key },
@@ -784,6 +823,7 @@ export class Engine {
         // with the observation verb). Laya still selects the real DOM target below.
         const verb = spec.verb;
         let control;
+        let action = verb;
         if (verb === 'editor') {
             await replayEditorOperation(
                 this.page,
@@ -799,12 +839,7 @@ export class Engine {
             if (!spec.target) throw new Halt('缺少测试数据', '没有明确网址');
             await this.navigate(spec.target);
         } else if (verb === 'path') {
-            // If a path's final destination is already visible, choose it directly.
-            const snap = await observe(this.page),
-                leaf = spec.path.at(-1);
-            const candidates = snap.controls.filter((c) => norm(c.name) === norm(leaf));
-            if (candidates.length === 1) control = await this.directClick(leaf, text);
-            else for (const part of spec.path) control = await this.directClick(part, text);
+            ({ action, control } = await this.followMenu(spec.path, text));
         } else if (verb === 'observe') {
             const names = quoted(text);
             if (names.length === 1 && /按钮/.test(text)) {
@@ -966,7 +1001,7 @@ export class Engine {
         const event = {
             phase: this.phase,
             text,
-            action: verb,
+            action,
             ...(control
                 ? { control: { name: control.name, role: control.role, context: control.context } }
                 : {}),

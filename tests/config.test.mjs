@@ -7,6 +7,8 @@ import {
     configured,
     configuredFlag,
     loadProjectConfig,
+    moduleRouteFor,
+    resolveModuleRoutes,
     loadLocalEnvironment,
     environmentData,
 } from '../scripts/lib/project-config.mjs';
@@ -151,4 +153,30 @@ test('environment supports all migrated runtime settings without evaluating thei
         }
         await fs.rm(dir, { recursive: true, force: true });
     }
+});
+
+test('module routes resolve at the project URL and preserve distinct menu paths', () => {
+    const base = 'https://example.test/app/';
+    const routes = resolveModuleRoutes(
+        {
+            '业务 > 列表': 'business',
+            '财务 → 列表': '#/finance',
+            报表: '/reports',
+            可选: '',
+        },
+        base,
+    );
+    assert.equal(moduleRouteFor(routes, ['业务', '列表']), base + 'business');
+    assert.equal(moduleRouteFor(routes, ['财务', '列表']), base + '#/finance');
+    assert.equal(moduleRouteFor(routes, ['列表']), undefined);
+    assert.equal(moduleRouteFor(routes, ['其它', '列表']), undefined);
+    assert.equal(moduleRouteFor(routes, ['业务', '报表']), 'https://example.test/reports');
+    assert.equal(moduleRouteFor(routes, ['可选']), undefined);
+    for (const invalid of [
+        { 菜单: '//outside.test' },
+        { 菜单: 'javascript:void(0)' },
+        { 菜单: 1 },
+        [],
+    ])
+        assert.throws(() => resolveModuleRoutes(invalid, base));
 });

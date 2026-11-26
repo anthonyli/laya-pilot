@@ -22,6 +22,7 @@ import { assessNavigationHealth, restoreNavigationDestinations } from './lib/rec
 import {
     loadLocalEnvironment,
     loadProjectConfig,
+    resolveModuleRoutes,
     configured,
     configuredFlag,
     environmentData,
@@ -434,6 +435,15 @@ async function main() {
     }
     if (!config.url) throw Error('请通过--url指定起始页面');
     config.origins = [new URL(config.url).origin];
+    const routesFile = arg('--module-routes', '');
+    let routeEntries = fileConfig.moduleRoutes;
+    if (routesFile) {
+        const routeConfig = await loadProjectConfig(routesFile);
+        if (!Object.hasOwn(routeConfig, 'moduleRoutes'))
+            throw Error('--module-routes 文件缺少 moduleRoutes 字段');
+        routeEntries = routeConfig.moduleRoutes;
+    }
+    config.moduleRoutes = resolveModuleRoutes(routeEntries, config.url);
     if (!['auto', 'generic'].includes(arg('--engine', 'auto')))
         throw Error('公开版只支持通用引擎；--engine 可选 auto 或 generic');
     console.log(
@@ -519,7 +529,8 @@ async function main() {
             const d = describe(s);
             return d.verb === 'path' && d.path.length > 1;
         });
-    if (entry) {
+    // Mapped workbooks can span modules. Resolve each navigation when its own case reaches it.
+    if (entry && !config.moduleRoutes.size) {
         console.log('进入Excel指定模块：' + entry);
         await engine.step(entry);
         config.url = page.url();

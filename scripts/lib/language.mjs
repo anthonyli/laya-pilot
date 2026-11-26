@@ -221,22 +221,28 @@ export function describe(step) {
     if ((m = step.match(/^点击第\s*([1-9][0-9]{0,2}|1000)\s*个「([^」]+)」按钮$/)))
         return { verb: 'click', target: m[2], ordinal: Number(m[1]) };
     if (/^(点击|单击|再点击|切换|选择|进入|打开|click\b|open\b|go to\b)/i.test(step)) {
-        let target =
-            q[0] ||
-            step
-                .replace(
-                    /^(?:再点击|点击|单击|切换到?|选择|进入|打开|click(?: on)?|open|go to)\s*/i,
-                    '',
-                )
-                .replace(/(?:按钮|页面|列表页|Tab(?:切回)?|标签页)$/i, '')
-                .trim();
-        if (/[>＞→]/.test(target) || /^进入/.test(step))
+        const body = step.replace(
+            /^(?:再点击|点击|单击|切换到?|选择|进入|打开|click(?: on)?|open|go to)\s*/i,
+            '',
+        );
+        if (
+            /[>＞→]/.test(body) ||
+            /^(?:进入|go to\b)/i.test(step) ||
+            /^(?:点击|单击|打开).+菜单(?:项)?$/.test(step) ||
+            /^打开.*(?:页面|模块)$/.test(step)
+        )
             return {
                 verb: 'path',
-                path: target
-                    .split(/\s*[>＞→]\s*/)
-                    .map((x) => x.replace(/(?:页面|列表页)$/, '').trim()),
+                path: body.split(/\s*[>＞→]\s*/).map((part) =>
+                    part
+                        .replace(/(?:模块页面|页面|列表页|模块|菜单项?)$/, '')
+                        .trim()
+                        .replace(/^[“「『"]|[”」』"]$/g, '')
+                        .trim(),
+                ),
             };
+        const target =
+            q[0] || body.replace(/(?:按钮|页面|列表页|Tab(?:切回)?|标签页)$/i, '').trim();
         return { verb: 'click', target };
     }
     if (/^(查看|观察|检查|验证|确认|inspect\b|observe\b|verify\b)/i.test(step))

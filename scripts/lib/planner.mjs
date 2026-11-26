@@ -1,3 +1,4 @@
+import { moduleRouteFor } from './project-config.mjs';
 import { describe, quoted, norm, Halt } from './language.mjs';
 
 // Compile human phrasing into bounded tools, not executable model output.
@@ -9,7 +10,7 @@ export function scopeNames(text, controls) {
         ),
     ];
 }
-export function expandStep(text, { controls = [], area = null } = {}) {
+export function expandStep(text, { controls = [], area = null, moduleRoutes } = {}) {
     const scopes = scopeNames(text, controls);
     if (/^切换.*Tab$/i.test(text) && scopes.length > 1) {
         return (area && scopes.includes(area) ? [area] : scopes).map((target) => ({
@@ -44,7 +45,11 @@ export function expandStep(text, { controls = [], area = null } = {}) {
         if (matches.length === 1) return [{ verb: 'click', target: matches[0].name }];
     }
     const spec = describe(source);
-    if (spec.verb === 'path' && spec.path.length === 1) {
+    if (
+        spec.verb === 'path' &&
+        spec.path.length === 1 &&
+        !moduleRouteFor(moduleRoutes, spec.path)
+    ) {
         const leaf = spec.path[0];
         const areaName = controls.find(
             (c) => c.role === 'tab' && leaf.endsWith(c.name + '列表'),

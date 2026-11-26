@@ -71,6 +71,7 @@ export function printRunHelp(version) {
                     '--provider local        Use the installed local model',
                     '--manual-login         Sign in in a visible browser',
                     '--ui-adapter FILE      Load project UI selectors for Excel replay',
+                    '--module-routes FILE   Load fallback menu URLs from moduleRoutes in JSON',
                     '--allow-write          Allow authorized write operations',
                 ],
             ],

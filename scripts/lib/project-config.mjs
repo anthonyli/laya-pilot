@@ -67,6 +67,7 @@ export async function loadProjectConfig(file) {
         throw Error('--config must contain a JSON object');
     const allowed = new Set([
         'url',
+        'moduleRoutes',
         'excel',
         'user',
         'python',
@@ -92,6 +93,42 @@ export async function loadProjectConfig(file) {
     const unknown = Object.keys(value).filter((key) => !allowed.has(key));
     if (unknown.length) throw Error('Unknown config keys: ' + unknown.join(', '));
     return value;
+}
+
+// Resolve against the original project URL before login or per-case navigation changes it.
+export function resolveModuleRoutes(entries, projectUrl) {
+    const routes = new Map();
+    if (entries === undefined) return routes;
+    if (!entries || typeof entries !== 'object' || Array.isArray(entries))
+        throw Error('moduleRoutes 必须是模块名称到 URL 的 JSON 对象');
+    for (const [menu, route] of Object.entries(entries)) {
+        const parts = menu.split(/[>＞→]/).map((part) => part.trim());
+        if (parts.some((part) => !part) || typeof route !== 'string')
+            throw Error('moduleRoutes 需要有效的模块名称和字符串 URL');
+        if (!route.trim()) continue;
+        const name = parts.join(' → ');
+        const url = new URL(route.trim(), projectUrl);
+        if (
+            !['http:', 'https:'].includes(url.protocol) ||
+            url.origin !== new URL(projectUrl).origin ||
+            url.username ||
+            url.password
+        )
+            throw Error('模块 URL 必须属于当前测试站点：' + name);
+        if (routes.has(name) && routes.get(name) !== url.href)
+            throw Error('模块路径存在冲突：' + name);
+        routes.set(name, url.href);
+    }
+    return routes;
+}
+
+export function moduleRouteFor(routes, parts) {
+    if (!routes?.size) return;
+    const leaf = parts.at(-1);
+    const exact = routes.get(parts.join(' → ')) || routes.get(leaf);
+    if (exact || parts.length > 1) return exact;
+    const matches = [...routes].filter(([menu]) => menu.endsWith(' → ' + leaf));
+    if (matches.length === 1) return matches[0][1];
 }
 
 export function configured(arg, cli, env, file, fallback) {

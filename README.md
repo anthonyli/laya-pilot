@@ -90,6 +90,7 @@ laya run --excel cases.xlsx --url 'https://your-test-app.example/module' --headl
 ```
 
 - 已有 Excel 不需要转换格式。没有用例时，可以复制 [Excel 模板](assets/test-cases-template.xlsx)，按 [填写说明](references/case-template.md) 修改其中的示例。
+- 旧用例只写菜单名称时，可加 `--module-routes routes.json`。例如 `{"moduleRoutes":{"订单管理 → 订单列表":"/orders","退款列表":"/refunds"}}`。进入模块时先找菜单，找不到才使用项目同源 URL。普通按钮操作和菜单可见性检查仍按页面实际状态执行。
 - 默认执行全部用例，用例中的步骤和预期保持原样，原工作簿不会被改写。
 - 用例包含新增、修改、删除时，需在测试环境中加 `--allow-write`。
 

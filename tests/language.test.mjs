@@ -97,3 +97,12 @@ test('quoted semicolons stay in steps and expectations while outside separators 
     assert.equal(describe(lines('Fill "name" with "a;b；c"')[0]).value, 'a;b；c');
     assert.equal(expectation(lines('page shows "a;b"')[0]).target, 'a;b');
 });
+
+test('legacy menu instructions preserve quoted menu paths and distinguish button clicks', () => {
+    assert.deepEqual(describe('点击「退款列表」菜单项'), { verb: 'path', path: ['退款列表'] });
+    assert.deepEqual(describe('进入「财务」 → 「退款列表」模块'), {
+        verb: 'path',
+        path: ['财务', '退款列表'],
+    });
+    assert.deepEqual(describe('点击「退款列表」按钮'), { verb: 'click', target: '退款列表' });
+});

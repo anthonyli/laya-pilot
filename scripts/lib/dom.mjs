@@ -476,6 +476,7 @@ export async function target(
         rowKey,
         ordinal,
         allowDisabled = false,
+        requireMenu = false,
         minProbability = 0.68,
         minMargin = 0.18,
     } = {},
@@ -483,22 +484,34 @@ export async function target(
     let snap = await observe(page);
     // Global toolbar icons need the same live tooltip discovery as row actions.
     // Do it only when the requested action has no named match in its scope.
+    const namedMenu = (c) =>
+        !c.rowKey &&
+        ['link', 'menuitem', 'button', 'tab', 'treeitem'].includes(c.role) &&
+        norm(c.name) === norm(intent);
+    const named = requireMenu ? namedMenu : (c) => score(intent, c) >= 65;
     const scoped = snap.controls.filter((c) => c.rowKey === (rowKey || ''));
     if (
         ['click', 'hover'].includes(kind) &&
-        !scoped.some((c) => score(intent, c) >= 65) &&
+        !scoped.some(named) &&
         (scoped.some((c) => /^图标[:：]/.test(c.name)) ||
             snap.unidentifiedControls.some((c) => c.rowKey === (rowKey || '')))
     )
         snap = await discoverRowLabels(page, rowKey || '');
     // Bounded observation retries accommodate late asynchronous rendering; no action is retried.
-    for (let i = 0; i < 8 && !snap.controls.some((c) => score(intent, c) >= 65); i++) {
+    for (let i = 0; i < 8 && !snap.controls.some(named); i++) {
         await page.waitForTimeout(250);
         snap = await observe(page);
+    }
+    if (requireMenu) {
+        const menus = snap.controls.filter(namedMenu);
+        if (!menus.length) return null;
+        if (menus.every((c) => c.disabled))
+            throw new Halt('菜单不可用', '目标菜单已禁用：' + intent);
     }
     let candidates = snap.controls.filter(
         (c) => c.role !== 'password' && (allowDisabled || !c.disabled),
     );
+    if (requireMenu) candidates = candidates.filter(namedMenu);
     const orderedLocator =
         ordinal && page.getByRole('button', { name: intent, exact: true }).nth(ordinal - 1);
     if (orderedLocator) {
