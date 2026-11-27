@@ -274,6 +274,25 @@ test('replay parameters share one short value across fills, checkpoints and the 
     );
 });
 
+test('unfinished create recordings get fresh names and dropdowns while asserted selections stay fixed', async () => {
+    const { parameterizeRecordedFields } = await import('../scripts/lib/recording-cases.mjs');
+    const s = state([]);
+    const fill = event('fill', 'Function Name', s, s, { role: 'textbox', value: 'test' });
+    const select = event('select', 'Organization', s, s, { role: 'combobox', value: 'Original' });
+    const raw = { url, actions: [click('Add', s, s), select, fill] };
+    const recorded = parameterizeRecordedFields(raw);
+    assert.equal(recorded.parameters.recordName1, 'test${runKey}');
+    assert.match(
+        generateRecordedCases(recorded).cases.at(-1).steps,
+        /随机选择，无法随机时使用录制值「Original」/,
+    );
+    const asserted = parameterizeRecordedFields({
+        ...raw,
+        actions: [...raw.actions, { ...select, kind: 'assert', assertion: 'value' }],
+    });
+    assert.equal(asserted.actions[1].randomOption, undefined);
+});
+
 test('editor steps preserve literal syntax, line breaks and semicolons in formulas', async () => {
     const { editorStep } = await import('../scripts/lib/recorded-editor.mjs');
     const { variables } = await import('../scripts/lib/language.mjs');

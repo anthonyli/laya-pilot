@@ -145,6 +145,19 @@ export function describe(step) {
         };
     if (
         (m = step.match(
+            /^在(弹窗的)?「([^」]+)」(字段)?下拉框中随机选择，无法随机时使用录制值「([^」]+)」$/,
+        ))
+    )
+        return {
+            ...(m[3]
+                ? { verb: 'click', recordedRole: 'fieldOption', field: m[2], target: m[4] }
+                : { verb: 'select', locator: 'nativeSelect', target: m[2] }),
+            optionGoal: '',
+            recordedFallback: m[4],
+            ...(m[1] && { scope: 'dialog' }),
+        };
+    if (
+        (m = step.match(
             /^在(弹窗的)?「([^」]+)」字段下拉框中选择(?:任一可用选项|符合「([^」]+)」的选项)$/,
         ))
     )

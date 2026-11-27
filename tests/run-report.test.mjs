@@ -119,6 +119,12 @@ test('finalizeRun writes an index that links every screenshot and a summary', as
         html.includes(['cases', '001-缺失', '01-预期1-失败.png'].map(encodeURIComponent).join('/')),
     );
     assert.ok(html.includes('&lt;缺失&gt;'), 'case text is escaped');
+    assert.match(html, /<title>Falcon · /);
+    assert.match(html, /alt="">Falcon<\/div>/);
+    assert.match(html, /color-scheme: only light/);
+    assert.doesNotMatch(html, /prefers-color-scheme:\s*dark/);
+    const logo = await fs.readFile(new URL('../assets/falcon-96.png', import.meta.url));
+    assert.ok(html.includes('src="data:image/png;base64,' + logo.toString('base64') + '"'));
     for (const [tone, text] of [
         ['pass', '通过 · 页面检查'],
         ['unverified', '未验证 · 环境检查'],

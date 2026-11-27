@@ -24,7 +24,7 @@ export async function resolveNavigationMenu(
     laya,
     meta,
 ) {
-    if (!recordedHint) {
+    if (!recordedHint && config.decisionStrategy !== 'model-first') {
         const options = { name: requested, exact: true };
         const named = await scope
             .getByRole('button', options)
@@ -78,10 +78,16 @@ export async function resolveNavigationMenu(
         hint && navigationIconSelector(hint),
         {
             menu: true,
+            preferModel: config.decisionStrategy === 'model-first',
+            onExactFallback() {
+                actual = requested;
+                strategy = 'scan';
+            },
             onMatch(hinted) {
                 if (hinted) strategy = cached ? 'cached-icon' : 'recorded-icon';
             },
             choose:
+                config.decisionStrategy !== 'off' &&
                 laya?.choose &&
                 (async (names) => {
                     actual = await chooseReplayName(

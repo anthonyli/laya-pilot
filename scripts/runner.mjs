@@ -53,6 +53,7 @@ const flag = (n) => args.includes(n);
 await loadLocalEnvironment(dataRoot);
 const fileConfig = await loadProjectConfig(arg('--config', ''));
 const option = (cli, env, key, fallback) => configured(arg, cli, env, fileConfig[key], fallback);
+const runStarted = performance.now();
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const config = {
     credentialRoot: dataRoot,
@@ -62,6 +63,7 @@ const config = {
     python: option('--python', 'LAYA_PYTHON', 'python', venvPython),
     model: option('--model', 'LAYA_MODEL', 'model', 'convaiinnovations/laya-multilingual'),
     provider: option('--provider', 'LAYA_PROVIDER', 'provider', 'local'),
+    decisionStrategy: option('--decision-strategy', 'LAYA_DECISION_STRATEGY', 'decisionStrategy'),
     lazyModel: configuredFlag(args, '--lazy-model', 'LAYA_LAZY_MODEL', fileConfig.lazyModel),
     apiBase: option('--api-base', 'LAYA_API_BASE', 'apiBase', ''),
     apiModel: option('--api-model', 'LAYA_API_MODEL', 'apiModel', 'laya-decision'),
@@ -153,6 +155,7 @@ async function report(results, laya, source, warnings) {
         times = actual.map((x) => x.inference_ms).sort((a, b) => a - b);
     const summary = {
         source,
+        durationMs: Math.round(performance.now() - runStarted),
         input: path.basename(config.excel),
         url: safeUrl(config.url),
         selection: config.selection,
@@ -162,15 +165,20 @@ async function report(results, laya, source, warnings) {
         mode: config.headless ? 'headless' : 'headed',
         provider: config.provider,
         model: config.provider === 'api' ? config.apiModel : config.model,
+        decisionStrategy: config.decisionStrategy,
         modelStartup: laya.startup || null,
         ...(config.provider === 'api' ? { api_base: config.apiBase } : {}),
         engine:
-            '通用DOM候选 + ' +
-            (config.provider === 'api' ? 'API Laya' : '本地Laya') +
-            '选择 + 确定性断言',
+            config.decisionStrategy === 'off'
+                ? '规则定位 + 确定性断言'
+                : '通用DOM候选 + ' +
+                  (config.provider === 'api' ? 'API Laya' : '本地Laya') +
+                  '选择 + 确定性断言',
         counts,
         metrics: {
-            model_calls: actual.length,
+            model_calls:
+                actual.length +
+                (laya.errors || []).filter((e) => e.request_attempted !== false).length,
             model_errors: laya.errors?.length || 0,
             cache_hits: laya.records.length - actual.length,
             p50_ms: times[Math.floor(times.length / 2)] ?? null,
@@ -280,9 +288,20 @@ async function main() {
     if (arg('--review-plan', '') && !review) throw Error('--review-plan 需要 --mode reviewed');
     if (arg('--approved-hash', '') && !review) throw Error('--approved-hash 需要 --mode reviewed');
     if (!config.excel && !arg('--mode', '')) throw Error('请通过--excel指定用例文件');
+    if (
+        config.decisionStrategy &&
+        !['model-first', 'fallback', 'off'].includes(config.decisionStrategy)
+    )
+        throw Error('--decision-strategy 仅支持 model-first、fallback 或 off');
+    if (arg('--mode', '') === 'generate') config.decisionStrategy = undefined;
     if (!['local', 'api'].includes(config.provider))
         throw Error('--provider仅支持local或api，默认local');
-    if (config.provider === 'api' && !config.dryRun && (!config.apiBase || !config.apiModel))
+    if (
+        !config.decisionStrategy &&
+        config.provider === 'api' &&
+        !config.dryRun &&
+        (!config.apiBase || !config.apiModel)
+    )
         throw Error('API模式需配置 LAYA_API_BASE 和 LAYA_API_MODEL');
     if (config.browserProvider !== 'playwright')
         throw Error('当前只实现 playwright 浏览器驱动；browser-use 等适配器尚未实现');
@@ -370,7 +389,7 @@ async function main() {
     if (config.operations) throw Error('--operations 只适用于生成或带结构化计划的工作簿');
     await fs.mkdir(config.out, { recursive: true });
     let apiKey =
-        config.provider === 'api' && !config.dryRun
+        !config.decisionStrategy && config.provider === 'api' && !config.dryRun
             ? await secret('API密钥', 'LAYA_API_KEY')
             : undefined;
     laya = new Laya(
@@ -379,10 +398,12 @@ async function main() {
         config.model,
         logFile(config.out, 'decisions.ndjson'),
         {
+            decisionStrategy: config.decisionStrategy,
             provider: config.dryRun ? 'local' : config.provider,
             base: config.apiBase,
             model: config.apiModel,
             key: apiKey,
+            getKey: () => secret('API密钥', 'LAYA_API_KEY'),
             timeout: config.apiTimeout,
         },
     );
@@ -675,6 +696,7 @@ main().catch(async (e) => {
                     {
                         source: config.excel ? path.basename(config.excel) : null,
                         runStatus: 'failed',
+                        durationMs: Math.round(performance.now() - runStarted),
                         error: {
                             category: e.category || '启动失败',
                             message: errorMessage,

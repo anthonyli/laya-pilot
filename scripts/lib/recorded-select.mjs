@@ -66,6 +66,7 @@ export async function recordedSelectOption(
     scope = page,
     timeout = 4000,
     chooseName,
+    useRecordedFallback,
 ) {
     const choices = (within) => selectOptionChoices(page, within, name, markup);
     if (!opener) {
@@ -91,7 +92,7 @@ export async function recordedSelectOption(
     let deadline = Date.now() + timeout;
     // Mounting the portal, closing the previous popup and populating virtual options
     // can happen on separate renders. Re-evaluate ownership until the choice exists.
-    do {
+    for (;;) {
         const id = await opener.evaluate((el) => {
             const aria = el.matches('[aria-controls],[aria-owns]')
                 ? el
@@ -127,9 +128,15 @@ export async function recordedSelectOption(
             const { target } = await choices(owner);
             if (target) return target;
         }
-        if (Date.now() >= deadline) break;
+        if (Date.now() >= deadline) {
+            if (!useRecordedFallback) break;
+            name = useRecordedFallback();
+            useRecordedFallback = undefined;
+            deadline = Date.now() + timeout;
+            continue;
+        }
         await new Promise((resolve) => setTimeout(resolve, Math.min(50, deadline - Date.now())));
-    } while (Date.now() <= deadline);
+    }
     throw Error(`展开的下拉框中无法唯一定位选项「${name}」`);
 }
 

@@ -171,6 +171,8 @@ function actionStep(action, row, values, replacements) {
                 : `清空${scope}「${name}」输入框`,
         ];
     }
+    if (action.kind === 'select' && workbookText(action.value) && action.randomOption)
+        return [`在「${name}」下拉框中随机选择，无法随机时使用录制值「${action.value}」`];
     if (action.kind === 'select' && workbookText(action.value))
         return [`在「${name}」下拉框中选择「${action.value}」`];
     if (action.kind === 'check' || action.kind === 'uncheck')
@@ -201,6 +203,11 @@ function actionStep(action, row, values, replacements) {
         !action.target.field.row
     ) {
         const scope = action.target.field.scope === '弹窗' ? '在弹窗的' : '在';
+        if (action.randomOption)
+            return [
+                ...steps,
+                `${scope}「${action.target.field.name}」字段下拉框中随机选择，无法随机时使用录制值「${name}」`,
+            ];
         return [...steps, `${scope}「${action.target.field.name}」字段下拉框中点击「${name}」选项`];
     }
     const scope = action.target.scope === '弹窗' && role === 'button' ? '在弹窗中' : '';
@@ -872,13 +879,36 @@ export function parameterizeRecordedFields(recording) {
         recordDescription: /^(description|描述|备注)$/i,
     };
     for (const [index, group] of groupRecordedSteps(entries).entries()) {
-        if (
-            group.kind !== 'create' ||
-            !group.entries.some(({ step }) =>
-                /^(?:save|submit|保存|提交|保存并关闭)$/i.test(recordedButtonName(step) || ''),
+        if (group.kind !== 'create') continue;
+        for (const { action } of group.entries) {
+            const field = action.kind === 'select' ? action.target : action.target?.field;
+            const value = action.kind === 'select' ? action.value : action.target?.name;
+            if (
+                !(
+                    action.kind === 'select' ||
+                    (action.kind === 'click' && action.target?.locator === 'selectOption')
+                ) ||
+                !field?.name ||
+                field.row ||
+                !workbookText(value)
             )
-        )
-            continue;
+                continue;
+            // Keep a recorded choice when another step checks it or uses it as a target.
+            if (
+                recording.actions
+                    .slice(recording.actions.indexOf(action) + 1)
+                    .some(
+                        (later) =>
+                            later.target?.row === value ||
+                            later.target?.name === value ||
+                            later.value === value ||
+                            later.operation?.value?.includes(value) ||
+                            (later.kind === 'assert' && later.target?.name === field.name),
+                    )
+            )
+                continue;
+            replacements.set(action, { ...action, randomOption: true });
+        }
         const fills = group.entries
             .map((entry) => entry.action)
             .filter(

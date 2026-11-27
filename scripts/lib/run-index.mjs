@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,10 @@ import { LATEST_RUN, projectRunsDirectory, RUN_FILES } from './run-layout.mjs';
 import { writePrivateJson } from './run-state.mjs';
 import { eventLabel } from './diagnostics.mjs';
 import { reportStyles, setupScreenshotViewer } from './report-presentation.mjs';
+
+const reportLogo = readFileSync(new URL('../../assets/falcon-96.png', import.meta.url)).toString(
+    'base64',
+);
 
 // Turns any run directory (ordinary Excel, structured plan or Playwright replay)
 // into one view: a reliability verdict, then every case with its timeline and
@@ -61,6 +66,7 @@ function fromOrdinary(summary) {
             text: e.text,
             status: e.status,
             at: e.at,
+            durationMs: e.durationMs,
             screenshot: e.screenshot,
             error: e.screenshot_error,
             notes: e.notes,
@@ -77,6 +83,8 @@ function fromOrdinary(summary) {
     return {
         kind: '普通 Excel 用例',
         source: [summary.input, summary.url].filter(Boolean).join(' · '),
+        durationMs: summary.durationMs,
+        decisionStrategy: summary.decisionStrategy,
         provider: summary.provider,
         error: summary.error,
         cases,
@@ -105,6 +113,7 @@ function fromStructured(summary) {
             text: a.reason,
             status: a.status,
             screenshot: a.evidence,
+            durationMs: a.durationMs,
         })),
         assertions: [],
         checks: [],
@@ -114,6 +123,8 @@ function fromStructured(summary) {
     return {
         kind: summary.mode === 'generate' ? '从页面生成用例' : '结构化用例',
         source: summary.caseFile || summary.moduleUrl,
+        durationMs: summary.durationMs,
+        decisionStrategy: summary.decisionStrategy,
         provider: summary.provider,
         error: summary.error ? { message: summary.error, screenshot: summary.runEvidence } : null,
         pendingWrite: summary.pendingWrite,
@@ -176,13 +187,16 @@ function fromPlaywright(report, out) {
                         .join('\n'),
                     directory: evidenceFile ? path.posix.dirname(relative(evidenceFile.path)) : '',
                     durationMs:
-                        last && results.reduce((sum, result) => sum + (result.duration || 0), 0),
+                        last && results.every((r) => Number.isFinite(r.duration) && r.duration >= 0)
+                            ? results.reduce((sum, r) => sum + r.duration, 0)
+                            : undefined,
                     screenshot: relative(last?.screenshot?.path),
                     timeline: attempts.flatMap(({ result, label, screenshot }, index) => [
                         ...(retried
                             ? [
                                   {
                                       label,
+                                      durationMs: result.duration,
                                       status: statusLabel(result.status),
                                       screenshot:
                                           index < attempts.length - 1
@@ -193,6 +207,7 @@ function fromPlaywright(report, out) {
                             : []),
                         ...(result.steps || []).map((s) => ({
                             label: s.title,
+                            durationMs: s.duration,
                             status: s.error ? '失败' : '通过',
                         })),
                     ]),
@@ -216,6 +231,7 @@ function fromPlaywright(report, out) {
     return {
         kind: '录制回放（Playwright）',
         source: report.config?.rootDir,
+        durationMs: report.stats?.duration,
         cases,
         interrupted: cases.some((c) => c.status === PLAYWRIGHT_STATUS.interrupted),
         error: report.errors?.length
@@ -278,7 +294,7 @@ export function assess(view, { interrupted = false } = {}) {
             `Excel 共 ${view.selection.total} 条，本轮执行 ${view.selection.selected} 条。`,
         );
     if (view.pendingWrite) add('bad', '存在未确认的写操作，核对 logs/checkpoint.json 后再重跑。');
-    if (view.modelCalls === 0 && view.kind !== '录制回放（Playwright）')
+    if (view.modelCalls === 0 && !view.modelErrors && view.kind !== '录制回放（Playwright）')
         add('info', '本轮没有调用模型，结果来自固定规则和断言。');
 
     let verdict;
@@ -345,6 +361,14 @@ function screenshotButton(file, caption, attachmentLabel) {
     return `<button type="button" class="${attachmentLabel ? 'image-link' : 'shot'}" data-shot="${src}" data-caption="${label}" aria-haspopup="dialog" aria-label="放大查看：${label}">${attachmentLabel ? escape(attachmentLabel) : thumbnail}</button>`;
 }
 
+function duration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '未记录';
+    if (ms < 1000) return Math.round(ms) + ' 毫秒';
+    if (ms < 60000) return Number((ms / 1000).toFixed(2)) + ' 秒';
+    const seconds = Math.floor(ms / 1000);
+    return Math.floor(seconds / 60) + ' 分 ' + (seconds % 60) + ' 秒';
+}
+
 function caseHtml(c) {
     const kind = outcome(c.status);
     const shot = (file, label) => screenshotButton(file, `${c.id} · ${c.title} · ${label}`);
@@ -352,7 +376,7 @@ function caseHtml(c) {
         .map(
             (t) => `<li class="${outcome(t.status)}">
   <div class="step"><span class="badge ${outcome(t.status)}">${escape(t.status || '')}</span>
-  <b>${escape(t.label)}</b> ${escape(t.text || '')}${t.at ? ` <small>${escape(clock(t.at))}</small>` : ''}
+  <b>${escape(t.label)}</b> ${escape(t.text || '')}<small>${t.at ? escape(clock(t.at)) + ' · ' : ''}耗时 ${duration(t.durationMs)}</small>
   ${(t.notes || []).map((note) => `<div class="note">${escape(note)}</div>`).join('')}
   ${t.error ? `<div class="note">${escape(t.error)}</div>` : ''}</div>
   ${shot(t.screenshot, t.label)}
@@ -369,7 +393,7 @@ function caseHtml(c) {
     ];
     return `<details class="case ${kind}" ${kind === 'pass' || kind === 'neutral' ? '' : 'open'} id="case-${escape(c.id)}">
 <summary><span class="badge ${kind}">${escape(c.status)}</span> <span class="case-id">${escape(c.id)}</span> <span class="case-title">${escape(c.title)}</span>
-<small>${escape(c.location || '')}${c.durationMs != null ? ` · ${Math.round(c.durationMs)}ms` : ''}</small></summary>
+<small>${escape(c.location || '')} · 用例耗时 ${duration(c.durationMs)}</small></summary>
 <div class="case-body">
 ${c.reason ? `<p class="reason">${escape(c.reason)}${c.category ? ` <small>（${escape(c.category)}）</small>` : ''}</p>` : ''}
 ${issues.length ? `<details class="diagnostics"><summary>检查与诊断（${issues.length}）</summary><ul class="issues">${issues.map((i) => `<li class="${escape(i.tone || 'fail')}">${escape(i.text ?? i)}</li>`).join('')}</ul></details>` : ''}
@@ -398,15 +422,15 @@ export function renderIndex(view, assessment, files, hasTrace = false) {
         .join('');
     return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>falcon · ${escape(verdict.text)}</title>
+<title>Falcon · ${escape(verdict.text)}</title>
 <style>${reportStyles}</style></head><body>
-<header class="masthead"><div class="brand-row"><div class="brand"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4l3-7 4 13 3-8h4"/></svg>falcon</div>
+<header class="masthead"><div class="brand-row"><div class="brand"><img src="data:image/png;base64,${reportLogo}" width="32" height="32" alt="">Falcon</div>
 <small>生成于 ${escape(new Date().toLocaleString('zh-CN'))}</small></div></header>
 <main><h1>测试报告</h1>
-<p class="meta">${escape(view.kind)}${view.source ? ' · ' + escape(view.source) : ''}${view.provider ? ' · 模型：' + escape(view.provider) : ''}</p>
+<p class="meta">${escape(view.kind)}${view.source ? ' · ' + escape(view.source) : ''}${view.decisionStrategy ? ' · 决策策略：' + escape({ 'model-first': '模型优先', fallback: '按需兜底', off: '关闭模型' }[view.decisionStrategy] || view.decisionStrategy) : ''}${view.provider && view.decisionStrategy !== 'off' ? ' · 模型：' + escape(view.provider) : ''}</p>
 <div class="overview"><section class="verdict ${verdict.level}"><h2>${escape(verdict.text)}</h2>
 <ul class="signals">${signals.map((s) => `<li class="${s.level}">${escape(s.text)}</li>`).join('')}</ul></section>
-<div class="stats">${stat('用例', assessment.total, '')}${stat('通过', assessment.passed, 'pass')}${stat('失败', assessment.failed, 'fail')}${assessment.flaky ? stat('不稳定', assessment.flaky, 'blocked') : ''}${assessment.skipped ? stat('跳过', assessment.skipped, '') : ''}${stat('阻断/未完成', assessment.blocked, 'blocked')}${stat('未验证预期', assessment.unverified, 'unverified')}</div></div>
+<div class="stats">${stat('运行总耗时', duration(view.durationMs), '')}${stat('用例', assessment.total, '')}${stat('通过', assessment.passed, 'pass')}${stat('失败', assessment.failed, 'fail')}${assessment.flaky ? stat('不稳定', assessment.flaky, 'blocked') : ''}${assessment.skipped ? stat('跳过', assessment.skipped, '') : ''}${stat('阻断/未完成', assessment.blocked, 'blocked')}${stat('未验证预期', assessment.unverified, 'unverified')}</div></div>
 ${view.error?.screenshot && !view.cases.some((c) => c.screenshot === view.error.screenshot) ? `<section class="run-evidence final"><h3>运行失败时的页面</h3>${screenshotButton(view.error.screenshot, '运行失败时的页面')}</section>` : ''}
 ${view.externalReport ? `<p>Playwright 原始报告：<a href="${href(view.externalReport)}">${escape(view.externalReport)}</a></p>` : ''}
 <h2 class="section-title">用例</h2>

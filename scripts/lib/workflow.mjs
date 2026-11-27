@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { Laya, beginModelWarmup, waitModelWarmup } from './model.mjs';
 import { openBrowser } from './browser-provider.mjs';
-import { matchReplayTarget } from './replay-model.mjs';
+import { matchReplayTarget, modelOrRules } from './replay-model.mjs';
 import { observe, discoverRowLabels, settle } from './dom.mjs';
 import { ensureAuthentication, saveAuthState, captureFailureScreenshot } from './auth-state.mjs';
 import { RunJournal, watchInterruption, resultExitCode, writePrivateJson } from './run-state.mjs';
@@ -488,6 +488,7 @@ export class Workflow {
         try {
             for (let attempt = 1; attempt <= 3; attempt++) {
                 this.checkInterrupted();
+                const started = performance.now();
                 state.attempt = attempt;
                 const entry = { step: label, attempt, status: '通过', reason: '', evidence: '' };
                 try {
@@ -498,6 +499,7 @@ export class Workflow {
                         if (!this.case?.steps.includes(state.write)) this.record(state.write);
                         result = state.write;
                     } else result = await operation();
+                    entry.durationMs = Math.round(performance.now() - started);
                     if (this.case)
                         await this.captureStep(
                             entry,
@@ -510,6 +512,7 @@ export class Workflow {
                     this.checkInterrupted();
                     entry.status = '失败';
                     entry.reason = message(error);
+                    entry.durationMs ??= Math.round(performance.now() - started);
                     if (this.case) {
                         await this.captureStep(
                             entry,
@@ -575,7 +578,9 @@ export class Workflow {
         if (!candidates.length) throw Error('页面上没有可操作的' + purpose + '控件');
         // Replay grounds actions through Laya even for a single live match.
         // DOM scope guards and assertions still determine what may run and pass.
-        if (candidates.length === 1 && this.mode !== 'execute') {
+        const strategy = this.config.decisionStrategy;
+        const unique = candidates.length === 1;
+        if (unique && (this.mode !== 'execute' || ['off', 'fallback'].includes(strategy))) {
             const control = candidates[0],
                 locator = snap.frames[control.frame].locator(`[${LIVE_REF}="${control.ref}"]`);
             if ((await locator.count()) !== 1 || !(await locator.isVisible()))
@@ -600,24 +605,31 @@ export class Workflow {
             this.mode === 'execute'
                 ? '没有匹配的控件，停止操作'
                 : '页面控件与本次操作不匹配，不执行';
-        const result = await this.laya.choose(
-            this.mode === 'execute' ? `我要${purpose}。` : `要${purpose}，应选择哪个页面控件？`,
-            criteria,
-            {
-                phase: this.mode === 'execute' ? 'replay-target' : 'target',
-                mode: this.mode,
-                purpose,
-                url: snap.url,
-                candidates: shortlist.map(({ ref, ...c }) => c),
-            },
-        );
-        const control = byChoice.get(result.choice);
-        if (!control) throw Error('Laya未能确定' + purpose + '控件');
-        if (
-            !(result.probabilities?.[result.choice] >= (this.config.minProbability ?? 0.68)) ||
-            !(result.margin >= (this.config.minMargin ?? 0.18))
-        )
-            throw Error('Laya选择' + purpose + '控件的把握不足');
+        const choose = async () => {
+            const result = await this.laya.choose(
+                this.mode === 'execute' ? `我要${purpose}。` : `要${purpose}，应选择哪个页面控件？`,
+                criteria,
+                {
+                    phase: this.mode === 'execute' ? 'replay-target' : 'target',
+                    mode: this.mode,
+                    purpose,
+                    url: snap.url,
+                    candidates: shortlist.map(({ ref, ...c }) => c),
+                },
+            );
+            const control = byChoice.get(result.choice);
+            if (!control) throw Error('Laya未能确定' + purpose + '控件');
+            if (
+                !(result.probabilities?.[result.choice] >= (this.config.minProbability ?? 0.68)) ||
+                !(result.margin >= (this.config.minMargin ?? 0.18))
+            )
+                throw Error('Laya选择' + purpose + '控件的把握不足');
+            return control;
+        };
+        const control =
+            unique && strategy === 'model-first'
+                ? await modelOrRules(choose, () => candidates[0])
+                : await choose();
         const locator = snap.frames[control.frame].locator(`[${LIVE_REF}="${control.ref}"]`);
         if ((await locator.count()) !== 1 || !(await locator.isVisible()))
             throw Error('决策后页面控件已变化：' + purpose);
@@ -1569,6 +1581,7 @@ export class Workflow {
                             target: step.target?.name || '',
                         };
                         this.diagnostics.setStep(c.failedStep);
+                        const stepStarted = performance.now();
                         await runReplayOperation(
                             this.page,
                             [c.id, '第' + (index + 1) + '步', step.target?.name || step.kind].join(
@@ -1581,6 +1594,7 @@ export class Workflow {
                                     step: '第' + (index + 1) + '步',
                                     attempt: 1,
                                     status: '人工确认',
+                                    durationMs: Math.round(performance.now() - stepStarted),
                                     reason: '重新登录后由操作者确认上一步已完成。',
                                 }),
                         );
@@ -1779,7 +1793,7 @@ export async function runWorkflow(config, mode, readSecret, root) {
             runEvidence = '';
         try {
             let apiKey =
-                config.provider === 'api'
+                config.provider === 'api' && !config.decisionStrategy
                     ? registerSecret(await readSecret('API密钥', 'LAYA_API_KEY'))
                     : undefined;
             laya = new Laya(
@@ -1789,9 +1803,11 @@ export async function runWorkflow(config, mode, readSecret, root) {
                 logFile(config.out, 'decisions.ndjson'),
                 {
                     provider: config.provider,
+                    decisionStrategy: config.decisionStrategy,
                     base: config.apiBase,
                     model: config.apiModel,
                     key: apiKey,
+                    getKey: () => readSecret('API密钥', 'LAYA_API_KEY'),
                     timeout: config.apiTimeout,
                 },
             );
@@ -1982,10 +1998,14 @@ export async function runWorkflow(config, mode, readSecret, root) {
                     runEvidence,
                     pendingWrite: workflow?.pendingWrite || null,
                     retainedRecord: workflow?.created ? workflow.currentName : null,
+                    decisionStrategy: config.decisionStrategy,
                     modelStartup: laya?.startup || null,
                     discovery: workflow?.discovery || null,
                     metrics: {
-                        modelCalls: actualCalls.length + (laya?.errors?.length || 0),
+                        modelCalls:
+                            actualCalls.length +
+                            (laya?.errors || []).filter((e) => e.request_attempted !== false)
+                                .length,
                         modelErrors: laya?.errors?.length || 0,
                         cacheHits: (laya?.records.length || 0) - actualCalls.length,
                         inferenceMs: actualCalls.reduce((sum, r) => sum + (r.inference_ms || 0), 0),

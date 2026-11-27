@@ -38,7 +38,7 @@ The options are identical: `fa X` corresponds to `node scripts/run.mjs X`, and `
 The falcon DMG bundles the CLI for recording and replay in the desktop app. To use `fa` in a terminal or CI, install the standalone CLI:
 
 ```bash
-npm install -g github:anthonyli/laya-pilot#v0.2.5
+npm install -g github:anthonyli/laya-pilot#v0.2.6
 fa --version
 ```
 

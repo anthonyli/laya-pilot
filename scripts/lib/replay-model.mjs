@@ -1,3 +1,13 @@
+// Only wrap candidate selection. Browser actions and assertions must never be retried here.
+export async function modelOrRules(select, rules) {
+    try {
+        return await select();
+    } catch (error) {
+        console.log('  决策模型未能选定目标，使用规则定位：' + error.message);
+        return rules();
+    }
+}
+
 // Ground recorded actions in the live page without changing their test data.
 export async function matchReplayTarget(
     laya,
@@ -9,6 +19,20 @@ export async function matchReplayTarget(
 ) {
     const matches = candidates.filter((c) => c.name === expected);
     if (matches.length !== 1) throw Error(`用例目标「${expected}」在当前页面不唯一或已不存在`);
+    if (['fallback', 'off'].includes(config.decisionStrategy)) return matches[0];
+    if (config.decisionStrategy === 'model-first')
+        return modelOrRules(
+            () =>
+                matchReplayTarget(
+                    laya,
+                    action,
+                    expected,
+                    candidates,
+                    { ...config, decisionStrategy: undefined },
+                    meta,
+                ),
+            () => matches[0],
+        );
     const names = new Set([expected]);
     const shortlist = [matches[0]];
     for (const candidate of candidates) {

@@ -198,6 +198,20 @@ export async function findNamedIcon(
             }
             if (live.length > 1)
                 throw Error(`无法唯一定位图标「${name}」，找到 ${live.length} 个匹配项。`);
+            if (live.length === 1 && replay.preferModel && replay.choose) {
+                // The exact live menu is also the rule fallback if the model declines or picks a different label.
+                const names = [
+                    name,
+                    ...[...alternatives.keys()].filter((key) => alternatives.get(key)).slice(0, 6),
+                ];
+                try {
+                    if ((await replay.choose(names)) !== name) replay.onExactFallback?.();
+                } catch {
+                    replay.onExactFallback?.();
+                }
+                if (!(await live[0].evaluate((el) => el.isConnected && el.getClientRects().length)))
+                    throw Error('导航菜单在决策期间已发生变化。');
+            }
             if (!live.length && source === candidates && replay.choose && !matches.length) {
                 const names = [...alternatives.keys()].filter((key) => alternatives.get(key));
                 if (names.length) {

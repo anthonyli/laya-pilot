@@ -18,6 +18,7 @@ ROOT_FILES = {
 }
 RESOURCE_FILES = {
     'assets/.env.example',
+    'assets/falcon-96.png',
     'assets/test-cases-template.xlsx',
     'scripts/common.mjs',
     'scripts/run.mjs',

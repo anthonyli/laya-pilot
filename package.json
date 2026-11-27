@@ -1,6 +1,6 @@
 {
     "name": "laya-pilot",
-    "version": "0.2.5",
+    "version": "0.2.6",
     "private": false,
     "description": "Run browser regression tests from existing Excel cases for enterprise admin applications",
     "license": "MIT",
@@ -24,6 +24,7 @@
         "requirements.txt",
         "requirements-local.txt",
         "assets/.env.example",
+        "assets/falcon-96.png",
         "assets/test-cases-template.xlsx"
     ],
     "scripts": {

@@ -1,3 +1,4 @@
+import { selectOptionChoices } from './ui-adapter-select.mjs';
 import {
     awaitReplayLogin,
     navigateReplayPage,
@@ -66,6 +67,7 @@ import {
 import { observe, target, settle, assertionTarget, discoverRowLabels } from './dom.mjs';
 import { waitForReady, readTables } from './readiness.mjs';
 import { configureControlBindings } from './control-bindings.mjs';
+import { matchReplayTarget, modelOrRules } from './replay-model.mjs';
 import { expandStep, semanticStep, scopeNames, approvalOperation } from './planner.mjs';
 import { exactRecordRow, verifyExactRecord } from './exact-record.mjs';
 import {
@@ -221,6 +223,7 @@ export class Engine {
         if (actual !== name) console.log('  站点名称映射：' + name + ' → ' + actual);
         return target(this.page, this.laya, actual, {
             kind,
+            decisionStrategy: this.config.decisionStrategy,
             meta: { case: this.current?.key, step: this.actions, original_target: name },
             minProbability: this.config.minProbability,
             minMargin: this.config.minMargin,
@@ -290,8 +293,22 @@ export class Engine {
             note: `Laya 字段匹配：${from} → ${to}`,
         });
     }
-    async chooseOption(field, goal, names) {
-        if (!goal) return names[randomInt(names.length)];
+    async chooseOption(field, goal, names, recordedFallback) {
+        if (!goal) {
+            const any = () => names[randomInt(names.length)];
+            if (recordedFallback !== undefined || this.config.decisionStrategy !== 'model-first')
+                return any();
+            return modelOrRules(
+                () =>
+                    chooseReplayName(this.laya, '选择任一可用选项', names, this.config, {
+                        case: this.current?.key,
+                        step: this.actions,
+                        phase: 'dynamic-option',
+                        field,
+                    }),
+                any,
+            );
+        }
         return chooseReplayName(this.laya, `选择${goal}的选项`, names, this.config, {
             case: this.current?.key,
             step: this.actions,
@@ -312,7 +329,17 @@ export class Engine {
     async directClick(
         name,
         step,
-        { ordinal, scope, recordedRole, field, iconClass, role, optionGoal, nextLink } = {},
+        {
+            ordinal,
+            scope,
+            recordedRole,
+            field,
+            iconClass,
+            role,
+            optionGoal,
+            recordedFallback,
+            nextLink,
+        } = {},
     ) {
         let found;
         if (scope === 'dialog' || this.exactRecord || recordedRole) {
@@ -334,13 +361,54 @@ export class Engine {
                 location = '目标记录';
             }
             let actual = recordedRole === 'navIcon' ? name : this.config.labels?.[name] || name;
-            const options = { name: actual, exact: true };
             let roles = ['button', 'link', 'menuitem'];
             if (recordedRole === 'link' || recordedRole === 'option') roles = [recordedRole];
             if (recordedRole === 'area')
                 roles = isAreaSwitch({ role: 'button', name: actual })
                     ? ['tab', ...roles]
                     : ['tab'];
+            const preferModel = this.config.decisionStrategy === 'model-first';
+            const meta = { case: this.current?.key, step: this.actions };
+            if (
+                preferModel &&
+                [undefined, 'link', 'labelledButton', 'area'].includes(recordedRole)
+            ) {
+                const byName = (label) => {
+                    const options = { name: label, exact: true };
+                    const control =
+                        recordedRole === 'labelledButton'
+                            ? container
+                                  .getByRole('button', options)
+                                  .and(container.getByLabel(label, { exact: true }))
+                            : roles
+                                  .map((role) => container.getByRole(role, options))
+                                  .reduce((a, b) => a.or(b));
+                    return control.filter({ visible: true });
+                };
+                const snapshot = await observe(this.page);
+                const eligible = snapshot.controls.filter(
+                    (c) => roles.includes(c.role) && c.name && !c.disabled,
+                );
+                const names = [];
+                for (const label of new Set([actual, ...eligible.map((c) => c.name)])) {
+                    const scoped = byName(label);
+                    if ((await scoped.count()) === 1 && (await scoped.isEnabled()))
+                        names.push(label);
+                    if (names.length === 7) break;
+                }
+                if (names.length) {
+                    const preferred = await modelOrRules(
+                        () =>
+                            chooseReplayName(this.laya, step, names, this.config, {
+                                ...meta,
+                                phase: 'replay-target',
+                            }),
+                        () => actual,
+                    );
+                    if (preferred === actual || !(await byName(actual).count())) actual = preferred;
+                }
+            }
+            const options = { name: actual, exact: true };
             const timeout = this.config.assertTimeout || 4000;
             let locator, opener, navigation;
             try {
@@ -354,13 +422,35 @@ export class Engine {
                     } else {
                         const chooseName =
                             optionGoal === undefined
-                                ? undefined
+                                ? preferModel
+                                    ? async (names) => {
+                                          if (names.includes(actual)) {
+                                              const selected = await matchReplayTarget(
+                                                  this.laya,
+                                                  '选择选项',
+                                                  actual,
+                                                  names.map((name) => ({ name })),
+                                                  this.config,
+                                                  meta,
+                                              );
+                                              return selected.name;
+                                          }
+                                          return actual;
+                                      }
+                                    : undefined
                                 : async (names) => {
                                       actual = await this.chooseOption(
                                           resolved.name,
                                           optionGoal,
                                           names,
+                                          recordedFallback,
                                       );
+                                      if (
+                                          recordedFallback &&
+                                          names.length === 1 &&
+                                          actual === recordedFallback
+                                      )
+                                          optionGoal = '仅有录制值可选';
                                       return actual;
                                   };
                         locator = await recordedSelectOption(
@@ -371,6 +461,13 @@ export class Engine {
                             container,
                             timeout,
                             chooseName,
+                            recordedFallback &&
+                                (() => {
+                                    optionGoal = '回退到录制值';
+                                    actual =
+                                        this.config.labels?.[recordedFallback] || recordedFallback;
+                                    return actual;
+                                }),
                         );
                         await locator.waitForElementState('visible', { timeout });
                         if (
@@ -385,6 +482,25 @@ export class Engine {
                             throw new Halt('控件不可用', `选项「${actual}」已禁用。`);
                     }
                 } else if (recordedRole === 'option') {
+                    if (preferModel) {
+                        const { names } = await selectOptionChoices(
+                            this.page,
+                            container,
+                            null,
+                            this.selectMarkup,
+                        );
+                        if (names.includes(actual))
+                            actual = (
+                                await matchReplayTarget(
+                                    this.laya,
+                                    '选择选项',
+                                    actual,
+                                    names.map((name) => ({ name })),
+                                    this.config,
+                                    meta,
+                                )
+                            ).name;
+                    }
                     locator = await recordedSelectOption(
                         this.page,
                         actual,
@@ -399,6 +515,24 @@ export class Engine {
                         .and(container.getByLabel(actual, { exact: true }));
                     await locator.waitFor({ state: 'visible', timeout });
                 } else if (recordedRole === 'cardTitle') {
+                    if (preferModel) {
+                        const titles = await container
+                            .locator(this.ui.cardTitle)
+                            .filter({ visible: true })
+                            .allInnerTexts();
+                        const names = titles.map((title) => title.trim()).filter(Boolean);
+                        if (names.length) {
+                            const chosen = await modelOrRules(
+                                () =>
+                                    chooseReplayName(this.laya, step, names, this.config, {
+                                        ...meta,
+                                        phase: 'replay-target',
+                                    }),
+                                () => actual,
+                            );
+                            if (!names.includes(actual)) actual = chosen;
+                        }
+                    }
                     locator = await findDialogCard(container, actual, this.ui.cardTitle);
                 } else if (recordedRole === 'namedNavIcon') {
                     navigation = await resolveNavigationMenu(
@@ -448,9 +582,11 @@ export class Engine {
                 throw new Halt(
                     (this.exactRecord ? '记录' : scope === 'dialog' ? '弹窗' : '页面') +
                         '操作范围不明确',
-                    optionGoal !== undefined
-                        ? `${location}的「${field}」下拉框无法唯一定位可用选项`
-                        : `${location}内无法唯一定位「${name}」`,
+                    recordedFallback
+                        ? `${location}的「${field}」下拉框没有可用的随机选项，录制值「${recordedFallback}」也不可选`
+                        : optionGoal !== undefined
+                          ? `${location}的「${field}」下拉框无法唯一定位可用选项`
+                          : `${location}内无法唯一定位「${name}」`,
                 );
             }
             found = {
@@ -1231,10 +1367,29 @@ export class Engine {
                     });
             } else if (verb === 'select') {
                 if (spec.optionGoal !== undefined) {
-                    const value = await chooseNativeOption(found.locator, (names) =>
-                        this.chooseOption(control.name, spec.optionGoal, names),
+                    let reason = spec.optionGoal;
+                    const fallback =
+                        this.config.labels?.[spec.recordedFallback] || spec.recordedFallback;
+                    const value = await chooseNativeOption(
+                        found.locator,
+                        (names) => {
+                            if (fallback && names.length === 1 && names[0] === fallback)
+                                reason = '仅有录制值可选';
+                            return this.chooseOption(
+                                control.name,
+                                spec.optionGoal,
+                                names,
+                                fallback,
+                            );
+                        },
+                        fallback &&
+                            (() => {
+                                reason = '回退到录制值';
+                                return fallback;
+                            }),
+                        this.config.assertTimeout,
                     );
-                    this.noteOption(spec.target, spec.optionGoal, value);
+                    this.noteOption(spec.target, reason, value);
                 } else if (control.tag === 'select')
                     await found.locator.selectOption({ label: spec.value });
                 else {
@@ -1632,7 +1787,7 @@ export class Engine {
         this.area = null;
         this.observedName = null;
         this.pendingPreconditions = [];
-        const started = Date.now();
+        const started = performance.now();
         const failuresAt = this.failures.length,
             navAt = this.navigationCount;
         let touchedPage = false,
@@ -1781,6 +1936,7 @@ export class Engine {
                 for (const [index, original] of steps.entries()) {
                     if (index < replaced) continue;
                     let text = original;
+                    const stepStarted = performance.now();
                     const firstEvent = this.events.length;
                     let status = '已完成';
                     if (healthExpected.length)
@@ -1801,6 +1957,7 @@ export class Engine {
                         status = '未完成';
                         throw error;
                     } finally {
+                        const durationMs = Math.round(performance.now() - stepStarted);
                         if (
                             healthExpected.length &&
                             this.diagnostics &&
@@ -1821,6 +1978,7 @@ export class Engine {
                             .map((event) => event.note)
                             .filter(Boolean);
                         const sequence = await capture({
+                            durationMs,
                             ...(notes.length && { notes }),
                             phase: 'step',
                             index: index + 1,
@@ -1835,6 +1993,7 @@ export class Engine {
                 this.phase = 'assertion';
                 for (const [index, text] of expected.entries()) {
                     if (healthAssertions.has(text)) continue;
+                    const assertionStarted = performance.now();
                     let assertion;
                     try {
                         assertion = await runReplayOperation(this.page, text, false, () =>
@@ -1848,9 +2007,14 @@ export class Engine {
                         };
                         if (e.category === '模型API错误') throw e;
                     } finally {
-                        assertion = { ...assertion, scope: assertion?.scope ?? area };
+                        assertion = {
+                            ...assertion,
+                            scope: assertion?.scope ?? area,
+                            durationMs: Math.round(performance.now() - assertionStarted),
+                        };
                         assertion.evidence_sequence = await capture({
                             phase: 'assertion',
+                            durationMs: assertion.durationMs,
                             index: index + 1,
                             text,
                             scope: assertion.scope,
@@ -1923,7 +2087,6 @@ export class Engine {
         }
         result.stepsCompleted = completed;
         result.actions = this.events;
-        result.duration_ms = Date.now() - started;
         result.network_errors = this.failures.slice(failuresAt);
         result.page_navigations = this.navigationCount - navAt;
         this.lastCaseUiChanged = this.events.some(
@@ -1972,6 +2135,7 @@ export class Engine {
         }
         await Promise.all([...this.fieldMatches.values()].map((field) => field.handle.dispose()));
         this.fieldMatches.clear();
+        result.duration_ms = Math.round(performance.now() - started);
         return result;
     }
 }

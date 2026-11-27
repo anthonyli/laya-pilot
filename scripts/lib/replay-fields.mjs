@@ -1,3 +1,4 @@
+import { modelOrRules } from './replay-model.mjs';
 import { randomInt } from 'node:crypto';
 import { optionPurpose } from './test-data.mjs';
 import { Halt } from './language.mjs';
@@ -100,9 +101,16 @@ export async function resolveReplayField(
     const available = (control) =>
         ['select', 'native'].includes(kind) ? control.isEnabled() : control.isEditable();
     const original = locate(expected);
-    if ((await original.count()) || !laya?.choose || multipleDialogs)
+    const preferModel = config.decisionStrategy === 'model-first';
+    if (
+        config.decisionStrategy === 'off' ||
+        (!preferModel && (await original.count())) ||
+        !laya?.choose ||
+        multipleDialogs
+    )
         return { locator: original, name: expected };
     if (
+        !preferModel &&
         previous &&
         (await stillMatched(locate(previous.name), previous.handle)) &&
         (await available(locate(previous.name)))
@@ -135,21 +143,25 @@ export async function resolveReplayField(
         );
     const handles = new Map();
     try {
-        for (const name of labels) {
+        for (const name of new Set([expected, ...labels])) {
             const matches = await locate(name).elementHandles();
             if (matches.length === 1 && (await available(matches[0])))
                 handles.set(name, matches[0]);
             else await Promise.all(matches.map((handle) => handle.dispose()));
         }
-        if (!handles.size || (await original.count())) return { locator: original, name: expected };
-        const name = await chooseReplayName(
-            laya,
-            `操作「${expected}」${{ select: '下拉框', native: '下拉框', search: '搜索框', number: '数值输入框', text: '输入框' }[kind]}`,
-            [...handles.keys()],
-            config,
-            { ...meta, phase: 'field-match', recorded_field: requested },
-        );
-        if (await original.count()) return { locator: original, name: expected };
+        if (!handles.size || (!preferModel && (await original.count())))
+            return { locator: original, name: expected };
+        const choose = () =>
+            chooseReplayName(
+                laya,
+                `操作「${expected}」${{ select: '下拉框', native: '下拉框', search: '搜索框', number: '数值输入框', text: '输入框' }[kind]}`,
+                [...handles.keys()],
+                config,
+                { ...meta, phase: 'field-match', recorded_field: requested },
+            );
+        const name = preferModel ? await modelOrRules(choose, () => expected) : await choose();
+        if (name === expected || (await original.count()))
+            return { locator: original, name: expected };
         const locator = locate(name);
         if (!(await stillMatched(locator, handles.get(name))) || !(await available(locator)))
             throw new Halt('DOM已变化', `字段「${name}」在匹配期间发生变化。`);
@@ -162,7 +174,7 @@ export async function resolveReplayField(
 }
 
 // Native option elements are normally not layout-visible while the select is closed.
-export async function chooseNativeOption(select, choose) {
+export async function chooseNativeOption(select, choose, useRecordedFallback, timeout = 4000) {
     const options = () =>
         select.evaluate((el) => {
             const options = [...el.options];
@@ -184,10 +196,22 @@ export async function chooseNativeOption(select, choose) {
                 )
                 .map((o) => o.label);
         });
-    const names = await options();
-    if (!names.length) throw new Halt('没有可用选项', '当前下拉框没有唯一可选的有效值。');
-    const value = await choose(names);
-    if (!(await options()).includes(value)) throw new Halt('DOM已变化', `选项「${value}」已变化。`);
+    let names = await options();
+    const deadline = Date.now() + timeout;
+    while (!names.length && useRecordedFallback && Date.now() < deadline) {
+        await select.page().waitForTimeout(50);
+        names = await options();
+    }
+    if (!names.length && !useRecordedFallback)
+        throw new Halt('没有可用选项', '当前下拉框没有唯一可选的有效值。');
+    let value = names.length ? await choose(names) : undefined;
+    const available = await options();
+    if (!available.includes(value)) {
+        if (!useRecordedFallback) throw new Halt('DOM已变化', `选项「${value}」已变化。`);
+        value = useRecordedFallback();
+        if (!available.includes(value))
+            throw new Halt('没有可用选项', `当前下拉框也无法选择录制值「${value}」。`);
+    }
     await select.selectOption({ label: value });
     if ((await select.evaluate(committedSelection, value)) !== 'matched')
         throw new Halt('选值未确认', `下拉框未确认选中「${value}」。`);

@@ -68,6 +68,7 @@ export function printRunHelp(version) {
                 'OPTIONS',
                 [
                     '--out DIR               Save results to a new directory',
+                    '--decision-strategy model-first|fallback|off   Excel replay control selection',
                     '--provider local        Use the installed local model',
                     '--manual-login         Sign in in a visible browser',
                     '--ui-adapter FILE      Load project UI selectors for Excel replay',

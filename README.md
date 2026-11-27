@@ -38,7 +38,7 @@ Excel 回放会直接定位名称和类型唯一匹配的控件。步骤与界�
 falcon 桌面版随 DMG 自带 CLI，安装后即可在桌面录制和回放。要在终端或 CI 使用 `fa`，安装独立 CLI：
 
 ```bash
-npm install -g github:anthonyli/laya-pilot#v0.2.5
+npm install -g github:anthonyli/laya-pilot#v0.2.6
 fa --version
 ```
 

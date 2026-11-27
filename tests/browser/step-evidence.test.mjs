@@ -313,6 +313,12 @@ book.save(sys.argv[1])
                 }),
             );
             assert.equal(summary.metrics.model_calls, 0);
+            assert.ok(summary.durationMs >= summary.results[0].duration_ms);
+            assert.ok(
+                summary.results[0].evidence.every(
+                    (e) => Number.isInteger(e.durationMs) && e.durationMs >= 0,
+                ),
+            );
             assert.equal(summary.results[0].status, '失败');
             const evidence = summary.results[0].evidence;
             assert.equal(evidence.length, 3);
@@ -325,6 +331,9 @@ book.save(sys.argv[1])
             const href = (file) => file.split('/').map(encodeURIComponent).join('/');
             assert.match(md, /步骤与断言证据/);
             assert.match(index, /未通过/);
+            assert.match(index, /运行总耗时/);
+            assert.match(index, /用例耗时/);
+            assert.doesNotMatch(index, /耗时 未记录/);
             await fs.access(path.join(out, 'results.xlsx'));
             for (const e of evidence) {
                 // Screenshots live in the case's own directory and are shown on the index page.
@@ -409,3 +418,38 @@ function run(command, args, options = {}) {
         child.once('close', (code) => resolve({ code, stdout, stderr }));
     });
 }
+
+test('Excel control selection respects the strategy and never dispatches a failed choice twice', async () => {
+    const browser = await chromium.launch();
+    try {
+        for (const [strategy, refusal, expectedCalls] of [
+            ['model-first', false, 1],
+            ['model-first', true, 1],
+            ['fallback', false, 0],
+            ['off', false, 0],
+        ]) {
+            const page = await browser.newPage();
+            await page.setContent(
+                '<button onclick="this.dataset.clicked=Number(this.dataset.clicked||0)+1">查询</button>',
+            );
+            let calls = 0;
+            const engine = new Engine(
+                page,
+                {
+                    choose: async (...args) => {
+                        calls++;
+                        if (refusal) throw Error('模拟模型不可用');
+                        return model.choose(...args);
+                    },
+                },
+                { decisionStrategy: strategy, delay: 0, maxSteps: 5 },
+            );
+            await engine.step('点击「查询」按钮');
+            assert.equal(await page.getByRole('button').getAttribute('data-clicked'), '1');
+            assert.equal(calls, expectedCalls);
+            await page.close();
+        }
+    } finally {
+        await browser.close();
+    }
+});

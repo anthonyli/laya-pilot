@@ -9,7 +9,11 @@ const SYSTEM_PROMPT =
 // promise captures errors until the caller reaches the pre-test readiness gate.
 // API providers are never called just to warm up.
 export function beginModelWarmup(laya, config, log = console.log) {
-    if (config.provider !== 'local' || config.lazyModel) {
+    if (config.decisionStrategy === 'off') {
+        laya.startup = { mode: 'off', status: 'disabled', elapsedMs: 0 };
+        return Promise.resolve(null);
+    }
+    if (config.decisionStrategy || config.provider !== 'local' || config.lazyModel) {
         laya.startup = { mode: 'on-demand', status: 'skipped', elapsedMs: 0 };
         return Promise.resolve(null);
     }
@@ -148,7 +152,11 @@ export class Laya {
     constructor(python, worker, model, log, options = {}) {
         this.provider = options.provider || 'local';
         if (!['local', 'api'].includes(this.provider)) throw Error('provider仅支持local或api');
-        if (this.provider === 'api') this.api = new ApiDecision(options);
+        this.decisionStrategy = options.decisionStrategy;
+        if (this.provider === 'api' && this.decisionStrategy !== 'off') {
+            if (this.decisionStrategy) this.apiOptions = options;
+            else this.api = new ApiDecision(options);
+        }
         this.model = model;
         this.log = log;
         this.seq = 0;
@@ -203,8 +211,18 @@ export class Laya {
         }
         this.pending.clear();
     }
-    request(data) {
+    async request(data) {
         if (this.closed) return Promise.reject(Error('Laya 已关闭'));
+        if (this.decisionStrategy === 'off' && ['decide', 'load'].includes(data.action))
+            throw new Halt('决策模型已关闭', '当前策略只允许规则执行。');
+        if (this.apiOptions && ['decide', 'load'].includes(data.action)) {
+            const options = this.apiOptions;
+            this.api = new ApiDecision({
+                ...options,
+                key: (await options.getKey?.()) ?? options.key,
+            });
+            this.apiOptions = null;
+        }
         if (this.api && data.action === 'decide') return this.api.decide(data.state, data.criteria);
         if (this.api && data.action === 'load')
             return this.api
@@ -223,6 +241,11 @@ export class Laya {
         });
     }
     async choose(state, criteria, meta = {}) {
+        if (this.decisionStrategy === 'off')
+            throw new Halt(
+                '决策模型已关闭',
+                '规则无法唯一确定这一步，请写明控件名称、所在区域或操作值。',
+            );
         const key = JSON.stringify({ state, criteria }),
             cached = this.cache.get(key);
         let result;
@@ -232,9 +255,10 @@ export class Laya {
             const failure = {
                 ...meta,
                 provider: this.provider,
-                model: this.api?.model || this.model,
+                model: this.api?.model || this.apiOptions?.model || this.model,
                 state,
                 criteria,
+                request_attempted: this.provider !== 'api' || Boolean(this.api),
                 error: e.message,
             };
             this.errors.push(failure);
@@ -246,7 +270,7 @@ export class Laya {
         const record = {
             ...meta,
             provider: this.provider,
-            model: this.api?.model || this.model,
+            model: this.api?.model || this.apiOptions?.model || this.model,
             state,
             criteria,
             choice: result.choice,

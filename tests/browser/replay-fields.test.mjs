@@ -153,6 +153,50 @@ test('native random choice skips placeholder, hidden, duplicate and disabled opt
     assert.equal(await page.locator('select').inputValue(), 'Sandbox');
 });
 
+test('recorded random choices use live options under model-first and fall back within the same field', async (t) => {
+    const { engine, page } = await form(t, selectorForm);
+    engine.config.decisionStrategy = 'model-first';
+    const open = '在弹窗中点击「Metric Category」字段的下拉框';
+    const pick = '在弹窗的「Metric Category」字段下拉框中随机选择，无法随机时使用录制值「Sandbox」';
+    const picked = () => engine.events.filter((e) => e.action === 'dynamic-option').at(-1);
+    const options = page.locator('#choices [role=option]');
+    await options.filter({ hasText: 'Sandbox' }).evaluate((el) => (el.hidden = true));
+    await engine.step(open);
+    await engine.step(pick);
+    assert.equal(picked().value, 'Production');
+    await options.filter({ hasText: 'Production' }).evaluate((el) => el.remove());
+    await options.filter({ hasText: 'Sandbox' }).evaluate((el) => {
+        el.hidden = false;
+        el.setAttribute('aria-expanded', 'false');
+    });
+    await engine.step(open);
+    await engine.step(pick);
+    assert.equal(picked().value, 'Sandbox');
+    assert.match(picked().note, /回退到录制值/);
+    await options.filter({ hasText: 'Sandbox' }).evaluate((el) => el.remove());
+    await engine.step(open);
+    await assert.rejects(() => engine.step(pick), /录制值「Sandbox」也不可选/);
+});
+
+test('a dependent native select reads its new options after the parent selection', async (t) => {
+    const { engine, page } = await form(
+        t,
+        `<label>Organization<select id=p>
+        <option value="">Choose</option><option>Other</option></select></label>
+        <label>Channel<select id=c><option value="">Choose</option></select></label>
+        <script>p.onchange=()=>setTimeout(()=>c.add(new Option("Other channel")),50)</script>`,
+    );
+    await engine.step('在「Organization」下拉框中随机选择，无法随机时使用录制值「Recorded org」');
+    await engine.step('在「Channel」下拉框中随机选择，无法随机时使用录制值「Recorded channel」');
+    assert.equal(await page.locator('#c').inputValue(), 'Other channel');
+    await page.locator('#c').evaluate((el) => (el.options.length = 1));
+    await assert.rejects(
+        () =>
+            engine.step('在「Channel」下拉框中随机选择，无法随机时使用录制值「Recorded channel」'),
+        /无法选择录制值/,
+    );
+});
+
 test('confirmed dropdowns and inputs skip default pacing and retain an explicit delay', async (t) => {
     const { engine, page } = await form(
         t,

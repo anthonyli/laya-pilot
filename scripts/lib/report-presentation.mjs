@@ -2,7 +2,7 @@
 // The paper, ink, typography, card and status tokens follow software-compare.
 export const reportStyles = `
 :root {
-    color-scheme: light;
+    color-scheme: only light;
     --paper: #f3f4f6;
     --ink: #111111;
     --text: #3a3a3a;
@@ -33,7 +33,7 @@ main, .brand-row { width: min(1120px, calc(100% - 64px)); margin-inline: auto; }
 .masthead { background: white; border-bottom: 1px solid var(--line); }
 .brand-row { min-height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 9px; font: 800 1.18rem/1 system-ui,sans-serif; letter-spacing: -.035em; }
-.brand svg { background: var(--ink); color: white; padding: 5px; border-radius: 8px; }
+.brand img { display: block; }
 main { padding: clamp(24px,4vw,52px) 0 64px; }
 h1, h2, h3, p, ul, ol { margin: 0; }
 h1 { font-size: clamp(2rem, 4vw, 3rem); line-height: 1.2; letter-spacing: -.035em; }
@@ -100,6 +100,14 @@ html:has(.viewer[open]) { overflow: hidden; }
 .viewer button { flex: none; display: grid; place-items: center; width: 40px; height: 40px; background: var(--paper); border: 0; border-radius: 50%; }
 .viewer button:hover { background: #e8eaee; }
 .viewer img { display: block; margin-inline: auto; max-width: 100%; max-height: calc(100dvh - 90px); object-fit: contain; }
+@media (prefers-reduced-motion: no-preference) {
+    .case > summary::after { transition: transform 165ms cubic-bezier(.2,.75,.2,1); }
+    .shot, .viewer button { transition: border-color 95ms, background-color 95ms; }
+    .viewer[open] { animation: evidence-open 165ms cubic-bezier(.2,.75,.2,1); }
+    .viewer[open]::backdrop { animation: evidence-shade 105ms ease-out; }
+    @keyframes evidence-open { from { opacity: .65; scale: .985; } }
+    @keyframes evidence-shade { from { opacity: 0; } }
+}
 @media (max-width: 680px) {
     main, .brand-row { width: calc(100% - 28px); }
     .brand-row small { font-size: .73rem; }

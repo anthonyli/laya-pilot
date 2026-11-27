@@ -1,3 +1,4 @@
+import { modelOrRules } from './replay-model.mjs';
 import { randomBytes } from 'node:crypto';
 import { Halt, norm } from './language.mjs';
 import { controlBindingsFor } from './control-bindings.mjs';
@@ -573,6 +574,7 @@ export async function target(
     intent,
     {
         kind = 'click',
+        decisionStrategy = laya?.decisionStrategy,
         instruction,
         role,
         meta = {},
@@ -626,6 +628,20 @@ export async function target(
     const choices = (snapshot) =>
         snapshot.controls.filter((c) => eligible(c) && c.name && !/^图标[:：]/.test(c.name));
     const decisionOptions = { ordinal, instruction, minProbability, minMargin, meta };
+    const retryRules = () =>
+        target(page, laya, intent, {
+            kind,
+            decisionStrategy: 'off',
+            instruction,
+            role,
+            meta,
+            rowKey,
+            ordinal,
+            allowDisabled,
+            requireMenu,
+            minProbability,
+            minMargin,
+        });
     let selection, earlyRejection;
     const initial = choices(snap);
     const sameChoices = (current) =>
@@ -638,6 +654,7 @@ export async function target(
     // Give a populated UI to Laya immediately. If it declines, allow late-rendered
     // exact controls and tooltip-only actions to appear before giving up.
     if (
+        decisionStrategy !== 'off' &&
         !ordinal &&
         !requireMenu &&
         !disabledExact(snap) &&
@@ -647,6 +664,7 @@ export async function target(
         try {
             selection = await chooseLiveTarget(laya, intent, kind, initial, snap, decisionOptions);
         } catch (error) {
+            if (decisionStrategy === 'model-first') return retryRules();
             if (!['Laya无法判断', 'Laya选择不确定'].includes(error.category)) throw error;
             earlyRejection = error;
         }
@@ -662,6 +680,7 @@ export async function target(
             snap = await observe(page);
             const current = choices(snap);
             if (
+                decisionStrategy !== 'off' &&
                 !requireMenu &&
                 !disabledExact(snap) &&
                 current.length &&
@@ -702,10 +721,34 @@ export async function target(
         throw new Halt('页面控件不足', `当前页面没有可用于${kind}的控件：${intent}`);
     if (!selection) {
         const exact = candidates.filter((c) => c.name === intent);
-        selection =
-            exact.length === 1
-                ? { control: exact[0], decision: null }
-                : await chooseLiveTarget(laya, intent, kind, candidates, snap, decisionOptions);
+        if (exact.length === 1 && decisionStrategy === 'model-first') {
+            // A model refusal or transport error can only fall back to a freshly verified exact match.
+            const preferred = await modelOrRules(
+                () => chooseLiveTarget(laya, intent, kind, candidates, snap, decisionOptions),
+                () => null,
+            );
+            if (
+                !preferred ||
+                preferred.control.ref !== exact[0].ref ||
+                preferred.control.frame !== exact[0].frame
+            )
+                return retryRules();
+            selection = preferred;
+        } else if (exact.length === 1) selection = { control: exact[0], decision: null };
+        else if (decisionStrategy === 'off')
+            throw new Halt(
+                '决策模型已关闭',
+                `规则无法唯一定位「${intent}」，请补充控件名称或所在区域。`,
+            );
+        else {
+            const choose = () =>
+                chooseLiveTarget(laya, intent, kind, candidates, snap, decisionOptions);
+            selection =
+                decisionStrategy === 'model-first'
+                    ? await modelOrRules(choose, () => null)
+                    : await choose();
+            if (!selection) return retryRules();
+        }
     }
     // A component can be relabelled or replaced while the model is deciding.
     // Re-observe and keep the same element identity and action semantics.

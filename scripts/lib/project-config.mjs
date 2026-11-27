@@ -37,6 +37,7 @@ export async function loadLocalEnvironment(root) {
         'TEST_OPERATIONS',
         'TEST_DATA',
         'LAYA_LAZY_MODEL',
+        'LAYA_DECISION_STRATEGY',
         'LAYA_API_TIMEOUT',
     ]);
     for (const [index, raw] of source.split(/\r?\n/).entries()) {
@@ -74,6 +75,7 @@ export async function loadProjectConfig(file) {
         'model',
         'provider',
         'lazyModel',
+        'decisionStrategy',
         'apiBase',
         'apiModel',
         'apiTimeout',
